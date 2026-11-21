@@ -125,7 +125,7 @@ Rule for every module: after completing it, (1) tick its checkbox here, (2) upda
 - [x] **M7** Frontend: upload UI, prompt input, results views (table, summary, discrepancies, missing info, key-values), source badges, copy button, error states — [doc](docs/modules/M07-frontend.md)
 - [x] **M8** Synthetic sample documents (application form PDF, supporting TXT, financials CSV with deliberate mismatches) — [doc](docs/modules/M08-sample-documents.md)
 - [x] **M9** Tests (pipeline + analysis provenance) — [doc](docs/modules/M09-tests.md)
-- [ ] **M10** README, AI disclosure, final cleanup — [doc](docs/modules/M10-readme-and-disclosure.md)
+- [x] **M10** README, AI disclosure, final cleanup — [doc](docs/modules/M10-readme-and-disclosure.md)
 
 ## Time Budget
 Total ~60 minutes for the whole assignment. Prefer the simplest thing that meets the requirement. If a module runs long, cut scope (e.g. skip OCR, keep a single analysis prompt path) and write it in KNOWN ISSUES rather than stalling.
@@ -253,6 +253,20 @@ Newest entries at the bottom. Each entry: date/time, module, what was done, file
   - **Intermittent `0xC0000409` worker crash** from M6 did not reproduce in four full runs. It is not explicitly guarded.
   - Pre-existing: this file has a duplicated `## DECISIONS LOG` heading. Left as is to keep this commit focused.
 - **Next step:** M10 — README (architecture, assumptions, completed functionality, known limitations, security, productionisation), AI tools disclosure built from the DECISIONS LOG, and final cleanup. Run `npm run check` once more after the README changes.
+
+### 2026-11-21 17:00 (local) — M10 README, AI disclosure, final cleanup. Status: submission-ready
+- **Done:** README filled in: overview, quick start, troubleshooting, 60-second demo, mermaid architecture diagram, data model, folder structure, requirement-by-requirement status (✅ / ⚠️ / ❌), assumptions, known limitations, security, productionisation, testing, AI disclosure. The developer-decisions list is a draft built only from `[Developer]` rows and is marked `TODO(Sachin)` for review. Cleanup: startup and unhandled-error output now go through `logger` (commit `bf86fcd`), the raw `console.error(err)` is removed, `.env.example` checked against `env.ts` (all 13 variables present), `.gitignore` checked, dependencies checked for use.
+- **Clean-state run:** removed `data/`, `node_modules` and build output. `npm ci` **failed** in `better-sqlite3`. Version 13.2.0 runs `node-gyp rebuild` during install, and this machine has no Visual Studio C++ tools, even though the package ships a `win32-x64` prebuilt binary. `npm install --ignore-scripts` succeeded, and the shipped binary loads on Node 24.15. The README documents this. `npm run samples:generate`: all files `unchanged`. `npm run check`: exit 0. Tests: shared 8, server 137 (16 files), client 2, total 147 tests in 19 files, all passing.
+- **Happy path (`npm run dev`, via the Vite proxy on :5173):** health, limits and client page respond. Four valid samples upload and reach `processed`. `script.exe` is rejected with `UNSUPPORTED_EXTENSION`, `fake.pdf` with `SIGNATURE_MISMATCH`, and `empty.txt` with `EMPTY_FILE`. Analysis completes with the MOCK provider: four discrepancies, 21 missing-information entries, sources on every finding. Markdown and JSON exports respond. Unknown routes return the 404 envelope. The dev log has no errors.
+- **Files touched:** `README.md`, `server/src/index.ts`, `server/src/middleware/errorHandler.ts`, `docs/modules/M10-readme-and-disclosure.md`, `CLAUDE.md`.
+- **Known issues (remaining):**
+  - **Windows install.** `npm install` fails without Visual Studio C++ tools (`better-sqlite3` runs `node-gyp rebuild`). Use `npm install --ignore-scripts`, documented in the README. The M10 acceptance test ("`npm install && npm run dev`") has only been run in that form on Windows.
+  - **Browser check.** The UI was not opened in a real browser. Layout, focus and phone width are unverified.
+  - **MOCK quality.** The missing-information list is noisy (21 entries on the sample set). The live OpenAI path is untested against an endpoint.
+  - **No lint.** ESLint is not configured.
+  - **Stray file.** A file named `C:UsersSachin…check.log` sits in the repo root from a bad shell redirect. It is git-ignored (`*.log`) and not committed. The user should delete it.
+  - **Pre-existing:** the duplicated `## DECISIONS LOG` heading in this file is left as is.
+- **Next step:** submission review by the developer: check the items in the M10 module doc and the developer-decisions draft in the README, then submit. No further modules.
 
 ## DECISIONS LOG
 
