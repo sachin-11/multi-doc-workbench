@@ -117,7 +117,7 @@ per-document extraction  ->  structured facts (each with documentId + location)
 Rule for every module: after completing it, (1) tick its checkbox here, (2) update its file in `docs/modules/`, (3) append to the PROGRESS LOG and DECISIONS LOG, (4) run `npm run typecheck` and `npm test`, (5) commit.
 
 - [x] **M1** Project setup + CLAUDE.md — [doc](docs/modules/M01-project-setup.md)
-- [ ] **M2** Shared types/schemas + SQLite schema (documents, analyses, findings) — [doc](docs/modules/M02-shared-schemas-and-db.md)
+- [x] **M2** Shared types/schemas + SQLite schema (documents, analyses, findings) — [doc](docs/modules/M02-shared-schemas-and-db.md)
 - [ ] **M3** Upload API + file validation + secure handling — [doc](docs/modules/M03-upload-api.md)
 - [ ] **M4** Document processing pipeline (parser interface, PDF/TXT/CSV, chunking, error states) — [doc](docs/modules/M04-processing-pipeline.md)
 - [ ] **M5** LLM provider abstraction (real + mock) + structured output with zod — [doc](docs/modules/M05-llm-provider.md)
@@ -143,6 +143,20 @@ Newest entries at the bottom. Each entry: date/time, module, what was done, file
   - Vitest originally picked up compiled `dist/*.test.js`; fixed with `server/vitest.config.ts` excluding `dist/`.
 - **Next step:** M2 — shared Zod schemas for documents, analyses, findings (facts vs interpretation kept separate) and the `better-sqlite3` schema + seed.
 
+### 2026-11-21 15:10 (local) — M2 Shared schemas + SQLite data layer
+- **Done:** Zod schemas and inferred types in `shared/` for documents, facts (`ExtractedFact`), interpretation (`Finding` with non-empty `sources`, `isInterpretation: true`, `ComparisonTable`, `AnalysisRequest`, `AnalysisResult` with separate `perDocumentFacts` and findings fields). Constants (supported formats, MIME and extension maps, default limits). LLM output schemas (`PerDocumentExtractionOutput`, `CrossDocumentAnalysisOutput`) plus `findUnknownSourceDocumentIds` helper. SQLite schema (`CREATE TABLE IF NOT EXISTS`, CHECK constraints, FKs, indexes) applied on startup. Repositories `documentsRepo` and `analysesRepo` (prepared statements, transactions, zod validation on write and read). `DB_PATH` env (default `./data/app.db`), `npm run db:reset`. One vitest file with 3 tests (provenance round trip, finding without sources rejected with rollback, not-found and ordering).
+- **Verified:** `npm run typecheck` exit 0; `npm test` 6/6 passing (3 M1 + 3 M2); `npm run build` exit 0 and `dist/db/schema.sql` copied; real file DB created with FK on and WAL on; `db:reset` removes DB file; server starts and logs the DB path.
+- **Files touched:** `shared/src/{api,index,documents,facts,analysis,constants,llmOutput}.ts`, `server/src/config/env.ts`, `server/src/index.ts`, `server/src/db/{schema.sql,client.ts,reset.ts,repositories/documentsRepo.ts,repositories/analysesRepo.ts,repositories/repositories.test.ts}`, `server/scripts/copy-schema.mjs`, `server/package.json`, `package.json`, `package-lock.json`, `.env.example`, `.gitignore`, `docs/modules/M02-shared-schemas-and-db.md`.
+- **Known issues:**
+  - No seed script yet (optional in M02 doc). `db:reset` only deletes the DB.
+  - "Every finding has sources" is enforced in zod at the repository layer, not by a SQL trigger. A raw SQL insert could still create a finding with no `finding_sources` row.
+  - `findUnknownSourceDocumentIds` exists, but nothing calls it yet. M6 must call it before saving LLM output.
+  - `finding_sources.document_id` is not checked to belong to the analysis. The FK only checks that the document exists.
+  - `findings.created_at` is stored but not part of the `Finding` type.
+  - `better-sqlite3` native binary: `node_modules/@mdw/*` links were broken (Git Bash `/c/...` targets) and had to be recreated with a root `npm install`. Run `npm install` at the root if `@mdw/*` imports fail.
+  - Schema changes need `db:reset` until a migration tool is added.
+- **Next step:** M3 — upload API (`POST /api/documents`), file validation (type, size, count from config), filename sanitisation, memory/tmp handling. Use `openDatabase(config.DB_PATH)` and `createDocumentsRepo` from `server/src/db/`.
+
 ## DECISIONS LOG
 Ownership legend:
 - **[Assignment]**: fixed by the assignment brief
@@ -163,3 +177,9 @@ The AI-disclosure section of the README (M10) is built from this list. Mark each
 | D8 | 2026-11-21 | Project lives at `sachinProjects/multi-doc-workbench/`, a standalone git repo next to other projects (moved from a nested location) | Keeps unrelated files out of the submission repo | [Developer] (confirmed) |
 | D9 | 2026-11-21 | Facts vs interpretation kept separate; every finding has `sources: documentId[]` | Required by [Assignment] (provenance and separation) | [Assignment] |
 | D10 | 2026-11-21 | Per-document extraction first, then cross-document analysis; never one merged prompt | Required by [Assignment] | [Assignment] |
+| D11 | 2026-11-21 | Facts (`ExtractedFact`) and interpretation (`Finding`) are separate zod types, separate DB tables, and separate `AnalysisResult` fields (`perDocumentFacts` vs `findings` / `comparisonTable` / `summary` / `missingInformation`) | Core design rule: facts are what documents say, findings are AI conclusions | [Assignment] |
+| D12 | 2026-11-21 | Provenance in a `finding_sources` table (one row per source document, optional `fact_id` and `snippet`); a finding needs at least one row | Lets one finding cite several documents and link to the exact fact. Enforced by zod in the repository, not by SQL | [AI-suggested] |
+| D13 | 2026-11-21 | SQLite via `better-sqlite3` with WAL and `foreign_keys = ON`; schema in `schema.sql` applied on startup with `CREATE TABLE IF NOT EXISTS` (no migration tool) | Zero setup, safe concurrent reads, simple to review. Schema changes use `db:reset` for now | [AI-suggested] (SQLite itself is [Assignment]) |
+| D14 | 2026-11-21 | Repositories are factory functions that take the `Db` handle; tests use `:memory:` | No global singleton, isolated tests | [AI-suggested] |
+| D15 | 2026-11-21 | Max documents per analysis comes from config (`MAX_FILES`) through `createAnalysisRequestSchema(max)`. `DEFAULT_LIMITS` are only fallbacks and schema bounds | Limits stay configurable without hard-coding them in `shared` | [AI-suggested] |
+| D16 | 2026-11-21 | `DB_PATH` resolves relative to the repo root; `:memory:` is allowed | Same path regardless of which workspace runs the command | [AI-suggested] |

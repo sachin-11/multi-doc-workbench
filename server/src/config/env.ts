@@ -7,8 +7,16 @@ import { z } from 'zod';
 const here = path.dirname(fileURLToPath(import.meta.url));
 dotenv.config({ path: path.resolve(here, '../../../.env') });
 
+const REPO_ROOT = path.resolve(here, '../../..');
+
 const EnvSchema = z.object({
   PORT: z.coerce.number().int().positive().default(4000),
+  // SQLite file. Relative paths resolve against the repo root. ":memory:" is allowed (tests).
+  DB_PATH: z
+    .string()
+    .min(1)
+    .default('./data/app.db')
+    .transform((p) => (p === ':memory:' ? p : path.resolve(REPO_ROOT, p))),
   CLIENT_ORIGIN: z.string().url().default('http://localhost:5173'),
   // Empty string means "not set" -> MOCK LLM provider is used (M5).
   LLM_API_KEY: z
