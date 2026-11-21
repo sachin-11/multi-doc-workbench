@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest';
 import { canonicalKey, extractFactsFromText } from './mockExtraction.js';
-import { normalizeForComparison } from './mockAnalysis.js';
 
 describe('canonicalKey (MOCK key normalisation)', () => {
   it.each([
@@ -63,22 +62,5 @@ describe('MOCK extraction of long-form CSV tables', () => {
     const plain = ['Columns: name, address', 'Row 1: name=Jane Doe; address=12 High St'].join('\n');
     const keys = extractFactsFromText(plain).map((f) => f.key);
     expect(keys).toEqual(expect.arrayContaining(['name', 'address']));
-  });
-});
-
-describe('normalizeForComparison', () => {
-  it('ignores Indian digit grouping and the currency code', () => {
-    expect(normalizeForComparison('INR 4,80,00,000')).toBe(normalizeForComparison('INR 48000000'));
-    expect(normalizeForComparison('INR 4,80,00,000')).not.toBe(normalizeForComparison('INR 3,95,00,000'));
-  });
-
-  it('treats company suffix variants as the same name', () => {
-    expect(normalizeForComparison('Nimbus Agro Foods Pvt Ltd')).toBe(
-      normalizeForComparison('Nimbus Agro Foods Private Limited'),
-    );
-  });
-
-  it('still reports different names as different', () => {
-    expect(normalizeForComparison('Rohan Mehta')).not.toBe(normalizeForComparison('Rohan Mehra'));
   });
 });

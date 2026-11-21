@@ -35,4 +35,4 @@ The MOCK provider compared keys literally, so the planted items were missed. The
 - The mock does not compare dates with today, so it does not say the licence has probably expired.
 - It does not read prose qualifiers ("provisional").
 - It lists the EMI obligation as a fact, but does not summarise it as an obligation.
-- Missing-information lists are longer than the planted items. The mock reports a field as missing whenever any document lacks it.
+- (Changed after M10) Missing information is now computed in code for important fields only, so the list is short (about seven items on this set) and the same for the mock and a real model.

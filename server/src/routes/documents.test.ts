@@ -36,8 +36,10 @@ describe('documents API (integration)', () => {
     expect(parsed.rejected[0]?.code).toBe('UNSUPPORTED_EXTENSION');
     expect(parsed.rejected[0]?.originalName).toBe('setup.exe');
 
-    // Both rows are stored. The accepted file is processed in the background.
-    expect(ctx.documents.list()).toHaveLength(2);
+    // Only the accepted file is stored. A rejected file is reported in the response and never listed.
+    expect(ctx.documents.list()).toHaveLength(1);
+    expect(ctx.documents.list().map((d) => d.originalName)).toEqual(['application.txt']);
+    // The accepted file is processed in the background.
     await ctx.processor.whenIdle();
     const stored = ctx.documents.getById(parsed.accepted[0]?.id ?? '');
     expect(stored?.status).toBe('processed');

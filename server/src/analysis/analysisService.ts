@@ -31,15 +31,22 @@ import {
   validateProvenance,
   verifyFacts,
 } from '../llm/guards.js';
+import { compareFacts, type DeterministicComparison, type VerifiedComparison } from './comparison.js';
+import { groundModelFindings } from './grounding.js';
+import { replaceDocumentIds } from './summary.js';
 
 /*
- * Analysis engine (M6). Order of operations:
+ * Analysis engine (M6, reworked so the comparison is deterministic). Order of operations:
  *   1. Resolve documents. Problem documents are skipped with a warning. At least one must be usable.
  *   2. Stage A (independent): per-document, per-chunk extraction. Documents run in parallel, each with its
  *      own prompts. A failing document is excluded with a warning and the run continues.
- *   3. Stage B (collective): the cross-document prompt receives ONLY the structured facts, grouped by documentId.
- *   4. Guards: provenance (known documents and facts), fact ownership, snippet backfill, finding types.
- *   5. Persist once: facts, findings, summary, table, warnings and final status, in one transaction.
+ *   3. Deterministic comparison (code, no model): comparison table, discrepancies and missing information are
+ *      computed from the facts by normalised key and value (comparison.ts). Every value comes from a fact.
+ *   4. Stage B (collective): the cross-document prompt receives ONLY the structured facts, grouped by
+ *      documentId, plus the verified comparison. The model writes the summary and may add extra findings.
+ *   5. Guards on the model output: provenance (known documents and facts), fact ownership, snippet backfill,
+ *      and value grounding (grounding.ts), which rebuilds discrepancy and comparison wording from the facts.
+ *   6. Persist once: facts, findings, summary, table, warnings and final status, in one transaction.
  *
  * Failure policy: a per-document or per-chunk failure is a warning. A fatal failure (no document could be
  * extracted, the cross-document call fails, or the total time budget runs out) marks the run `failed`.
@@ -244,6 +251,7 @@ export function createAnalysisService(deps: AnalysisServiceDeps): AnalysisServic
     instruction: string,
     facts: Map<string, ExtractedFact[]>,
     docs: readonly UsableDocument[],
+    verified: VerifiedComparison | undefined,
     state: RunState,
   ): Promise<CrossDocumentAnalysisOutput> {
     assertNotCancelled(state);
@@ -254,6 +262,7 @@ export function createAnalysisService(deps: AnalysisServiceDeps): AnalysisServic
         originalName: doc.originalName,
         facts: facts.get(doc.documentId) ?? [],
       })),
+      ...(verified ? { verifiedComparison: verified } : {}),
     });
     const raw = await timed(analysisId, 'cross_document', async () =>
       provider.generateStructured({
@@ -311,7 +320,31 @@ export function createAnalysisService(deps: AnalysisServiceDeps): AnalysisServic
     const singleDocumentMode = succeeded.length < 2;
     if (singleDocumentMode) state.warnings.push(SINGLE_DOCUMENT_WARNING);
 
-    const output = await interpret(analysisId, instruction, factsByDocument, succeeded, state);
+    // The comparison is computed from the facts in code. With one document there is nothing to compare.
+    const deterministic: DeterministicComparison | null = singleDocumentMode
+      ? null
+      : compareFacts(
+          succeeded.map((doc) => ({ documentId: doc.documentId, originalName: doc.originalName })),
+          factsByDocument,
+        );
+
+    const output = await interpret(
+      analysisId,
+      instruction,
+      factsByDocument,
+      succeeded,
+      deterministic?.verified,
+      state,
+    );
+
+    // The model's missing-information items and table are not used: code owns them. Only its summary and
+    // extra findings continue, and those go through the guards below.
+    const modelOutput: CrossDocumentAnalysisOutput = {
+      ...output,
+      findings: output.findings.filter((f) => f.type !== 'missing_information'),
+      missingInformation: [],
+      comparisonTable: null,
+    };
 
     // Guards run on every output, whatever produced it.
     const allFacts = [...factsByDocument.values()].flat();
@@ -319,7 +352,7 @@ export function createAnalysisService(deps: AnalysisServiceDeps): AnalysisServic
     const factById = new Map(allFacts.map((fact) => [fact.id, fact]));
 
     const provenance = validateProvenance(
-      output,
+      modelOutput,
       succeeded.map((doc) => doc.documentId),
       [...factOwner.keys()],
     );
@@ -327,23 +360,36 @@ export function createAnalysisService(deps: AnalysisServiceDeps): AnalysisServic
     state.warnings.push(...provenance.warnings, ...ownership.warnings);
     const guarded = attachSnippetsFromFacts(ownership.cleaned, factById);
 
-    if (singleDocumentMode) {
+    if (deterministic === null) {
       return { findings: [], missingInformation: [], summary: guarded.summary, comparisonTable: null };
     }
 
-    // Missing-information items are stored with their own type, so the split below is always correct.
-    const missingFromFindings = guarded.findings.filter((f) => f.type === 'missing_information');
-    const findingDrafts = guarded.findings.filter((f) => f.type !== 'missing_information');
-    const missingDrafts = [...guarded.missingInformation, ...missingFromFindings].map((f) => ({
-      ...f,
-      type: 'missing_information' as const,
+    // Value grounding: a model discrepancy or comparison is kept only if its cited facts back it, and its
+    // wording is rebuilt from those facts.
+    const grounded = groundModelFindings(guarded.findings, {
+      factById,
+      documentNames: new Map(succeeded.map((doc) => [doc.documentId, doc.originalName])),
+      factKeys: deterministic.factKeys,
+      coveredKeys: deterministic.coveredKeys,
+    });
+    state.warnings.push(...grounded.warnings);
+
+    const named = succeeded.map((doc) => ({ documentId: doc.documentId, originalName: doc.originalName }));
+    const summary =
+      guarded.summary !== null && guarded.summary.trim().length > 0
+        ? replaceDocumentIds(guarded.summary, named)
+        : deterministic.fallbackSummary;
+    const modelFindings = grounded.kept.map((draft) => ({
+      ...draft,
+      title: replaceDocumentIds(draft.title, named),
+      description: replaceDocumentIds(draft.description, named),
     }));
 
     return {
-      findings: findingDrafts.map((draft) => toFinding(analysisId, draft)),
-      missingInformation: missingDrafts.map((draft) => toFinding(analysisId, draft)),
-      summary: guarded.summary,
-      comparisonTable: guarded.comparisonTable,
+      findings: [...deterministic.findings, ...modelFindings].map((draft) => toFinding(analysisId, draft)),
+      missingInformation: deterministic.missingInformation.map((draft) => toFinding(analysisId, draft)),
+      summary,
+      comparisonTable: deterministic.comparisonTable,
     };
   }
 

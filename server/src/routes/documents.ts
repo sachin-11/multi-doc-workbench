@@ -88,10 +88,13 @@ export function createDocumentsRouter(deps: DocumentsRouteDeps): Router {
           createdAt: new Date().toISOString(),
         });
 
-        // Rejected files are recorded too, so the UI can list them with their reason.
-        documents.insert(result.meta, null);
-
+        // Rule: a file that fails upload validation is reported in this response and is NOT stored. The
+        // document list therefore holds only accepted files. (The client's own pre-check rejects some files
+        // before they reach the server, so storing only the server's rejections made the list inconsistent.)
+        // A file that is accepted but later cannot be processed (corrupt PDF, image without OCR) is stored,
+        // and shows as Failed or Unsupported in the list.
         if (result.ok) {
+          documents.insert(result.meta, null);
           buffers.put(result.meta.id, file.buffer);
           accepted.push(result.meta);
           processor.enqueue(result.meta.id);

@@ -20,16 +20,16 @@ Instruction to use for the run (also what the automated test uses):
 
 > Highlight discrepancies in names, addresses, licence details, or revenue figures
 
-Run it with the **MOCK provider** (no `LLM_API_KEY`) unless the table says otherwise.
+The comparison table, the discrepancies and the missing-information items are computed in code from the extracted facts, so the result below is the same with the MOCK provider (no `LLM_API_KEY`) and with a real model, as long as the extraction finds the same facts. A real model also writes the summary and may add extra findings.
 
 ## A. Planted discrepancies (must be flagged)
 
 | # | Field | Values by file | Severity (expected) | Files involved | Mock detects? |
 |---|---|---|---|---|---|
-| D1 | Applicant name | `application_form.pdf`: **Rohan Mehta**. `supporting_letter.txt`: **Rohan Mehra** | high | application form, supporting letter | ✅ yes |
+| D1 | Applicant name | `application_form.pdf`: **Rohan Mehta**. `supporting_letter.txt`: **Rohan Mehra**. `kyc_summary.txt` (director): **Rohan Mehta** | high | application form, supporting letter, KYC summary | ✅ yes (the finding lists each document with its own value) |
 | D2 | Registered address | Form: **14 Lotus Park, Sector 21**, Gurugram, Haryana 122016. Letter: **14 Lotus Park, Sector 12**, Gurugram | medium | application form, supporting letter | ✅ yes |
 | D3 | Licence expiry | Form: **31-03-2027**. Letter: **31-03-2026** | medium | application form, supporting letter | ✅ yes |
-| D4 | Revenue FY2025 | Form: **INR 4,80,00,000**. Letter: **INR 3,95,00,000**. Financials CSV: **4,10,00,000** | high | application form, supporting letter, financials CSV | ✅ yes (three values, three sources) |
+| D4 | Revenue FY2025 | Form: **INR 4,80,00,000**. Letter: **INR 3,95,00,000**. Financials CSV: **4,10,00,000** | high | application form, supporting letter, financials CSV | ✅ yes (all three values, all three documents) |
 
 Also check that D3 is a *licence detail* problem, not only a date mismatch. The letter's licence is dated 31-03-2026, which is before the report date (2026-11-21), so it has **probably expired**. See section E.
 
@@ -37,9 +37,9 @@ Also check that D3 is a *licence detail* problem, not only a date mismatch. The 
 
 | # | Field | Values | Expected treatment | Mock detects? |
 |---|---|---|---|---|
-| C1 | Company name | Form: "Nimbus Agro Foods **Pvt Ltd**". KYC: "Nimbus Agro Foods **Private Limited**" (and the letter's "Pvt Ltd") | Same company. Formatting variant, low severity at most, not a discrepancy | ✅ not flagged (suffixes are normalised) |
+| C1 | Company name | Form: "Nimbus Agro Foods **Pvt Ltd**". KYC: "Nimbus Agro Foods **Private Limited**" (and the letter's "Pvt Ltd") | Same company. Formatting variant, not a discrepancy | ✅ not flagged. Reported as a low-severity match ("agree once formatting is ignored") |
 | C2 | Licence number | Form and letter: **FSL-TEST-0042** | Consistent | ✅ not flagged |
-| C3 | Director | Form: **Rohan Mehta**. KYC: **Rohan Mehta** | Consistent | ✅ not flagged |
+| C3 | Director | Form: **Rohan Mehta**. KYC: **Rohan Mehta** | Consistent. Part of the applicant / director name field (see D1) | ✅ the two agree. The letter's applicant is what differs |
 
 ## C. Planted missing information (must be reported)
 
@@ -49,9 +49,9 @@ Also check that D3 is a *licence detail* problem, not only a date mismatch. The 
 | M2 | **Revenue FY2025** | Form, letter, CSV | **KYC summary** ("No revenue figure is recorded") | ✅ yes |
 | M3 | **Licence details** | Form, letter | **KYC summary and financials CSV** (neither has a licence field) | ✅ yes |
 | M4 | **Registered address** | Form, letter | **KYC summary and financials CSV** (neither has an address field) | ✅ yes |
-| M5 | **Loan amount requested** (INR 75,00,000) and **tenure** (5 years) | Form only | Letter, CSV, KYC | ✅ yes |
+| M5 | **Loan amount requested** (INR 75,00,000) and **tenure** (5 years) | Form only | Letter, CSV, KYC | ➖ not reported. These are not among the important fields, so they appear in the comparison table only |
 
-The mock reports a field as missing whenever it is absent from *any* document in the run. So the missing list is longer than the planted items. The extra entries are real gaps (for example the CSV's `cash_and_equivalents` is not in the form), not false alarms.
+Only important fields are checked for gaps: names, address, licence number and expiry, revenue and the co-director. A field is reported when at least one document states it and another does not. A statement such as "No revenue figure is recorded" counts as a gap, not as a value. A prior-year figure that only one document carries (revenue FY2024 in the CSV) is not reported as a gap. On the sample set this gives about seven items: the planted ones above, plus the applicant and company name missing from the CSV.
 
 ## D. Obligations
 
@@ -99,4 +99,4 @@ Upload all four in **one** request. The response should have 0 accepted and 4 re
 
 ## Automated coverage
 
-`server/src/analysis/samples.test.ts` runs sections A, B, C and F through the real validation, parser and analysis code with the MOCK provider. It fails if a planted discrepancy disappears, if the company variant is flagged, or if an invalid file is accepted. Section D and section E are not asserted, because the mock is not expected to produce them.
+`server/src/analysis/samples.test.ts` and `server/test/analysis.samples.e2e.test.ts` run sections A, B, C and F through the real validation, parser and analysis code with the MOCK provider. They fail if a planted discrepancy disappears, if a document's value is paired with the wrong document, if the revenue discrepancy loses one of its three values, if the co-director or licence gap is not reported, if the comparison table is missing, if the company variant is flagged, or if an invalid file is accepted. Section D and section E are not asserted, because the mock is not expected to produce them.

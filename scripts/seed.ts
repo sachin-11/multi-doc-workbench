@@ -60,14 +60,14 @@ async function main(): Promise<void> {
         { originalName: sample.name, declaredMimeType: sample.mimeType, buffer },
         { id: randomUUID(), createdAt: new Date().toISOString() },
       );
-      documents.insert(result.meta, null);
-
+      // Same rule as the upload route: a rejected file is reported, not stored.
       if (!result.ok) {
         failures += 1;
         console.log(`rejected  ${sample.name}: ${result.reason}`);
         continue;
       }
 
+      documents.insert(result.meta, null);
       buffers.put(result.meta.id, buffer);
       await processor.processNow(result.meta.id);
 

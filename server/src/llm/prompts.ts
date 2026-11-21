@@ -29,6 +29,25 @@ export interface PromptPair {
 
 export type ExtractionFact = PerDocumentExtractionOutput['facts'][number];
 
+/**
+ * Results of the deterministic comparison (computed in code from the facts). They go into the prompt so the
+ * model can write a summary that agrees with them. The model does not recompute or restate them.
+ */
+export const VerifiedComparisonSchema = z.object({
+  discrepancies: z.array(
+    z.object({
+      field: z.string(),
+      /** Documents are named by file name, so a summary written from this never shows an id. */
+      values: z.array(z.object({ document: z.string(), value: z.string() })),
+    }),
+  ),
+  missing: z.array(
+    z.object({ field: z.string(), presentIn: z.array(z.string()), absentFrom: z.array(z.string()) }),
+  ),
+  consistentFields: z.array(z.string()),
+});
+export type VerifiedComparisonPayload = z.infer<typeof VerifiedComparisonSchema>;
+
 /** Payload embedded in the cross-document prompt. Facts only, never raw text. */
 export const CrossDocumentPayloadSchema = z.object({
   documents: z.array(
@@ -38,6 +57,7 @@ export const CrossDocumentPayloadSchema = z.object({
       facts: z.array(ExtractedFactSchema),
     }),
   ),
+  verifiedComparison: VerifiedComparisonSchema.optional(),
 });
 export type CrossDocumentPayload = z.infer<typeof CrossDocumentPayloadSchema>;
 
@@ -133,6 +153,8 @@ export function mergeChunkFacts(perChunk: readonly (readonly ExtractionFact[])[]
 export interface CrossDocumentInput {
   instruction: string;
   documents: readonly { documentId: string; originalName: string; facts: readonly ExtractedFact[] }[];
+  /** Deterministic comparison results. Present whenever two or more documents are compared. */
+  verifiedComparison?: VerifiedComparisonPayload;
 }
 
 /** Cross-document prompt. Input is the structured facts only, grouped and labelled by documentId. */
@@ -143,15 +165,20 @@ export function buildCrossDocumentAnalysisPrompt(input: CrossDocumentInput): Pro
       originalName: doc.originalName,
       facts: [...doc.facts],
     })),
+    ...(input.verifiedComparison ? { verifiedComparison: input.verifiedComparison } : {}),
   };
 
   const system = [
     'You interpret facts that were already extracted from several documents. You do not read the documents themselves.',
     'Rules:',
     '- Use ONLY the facts inside <facts_json>. Do not add outside knowledge.',
-    '- Every finding, missing-information item and comparison row must cite sources. Each source documentId must appear in <facts_json>. Add factId when one specific fact supports the point. Never cite an id that is not in the input.',
-    '- Keep these apart: discrepancies (values disagree), missing information (a field present in some documents but absent from others), comparisons (values agree), and a short consolidated summary.',
-    '- Set severity to low, medium or high for discrepancies and missing information. Use null for comparisons.',
+    '- When <facts_json> has "verifiedComparison", it was computed by code from the facts and is authoritative. It lists the discrepancies, the missing fields and the fields that agree. Do not repeat it, recompute it, or contradict it. Base your summary on it.',
+    '- summary: two to four sentences answering the analysis instruction, consistent with verifiedComparison. Quote values only as they appear in the facts. Refer to documents by their originalName, never by documentId.',
+    '- findings: ONLY extra points relevant to the instruction that verifiedComparison does not already cover. Use type "summary_point" for a point that rests on one document or on reasoning (for example a date that has passed). Use type "discrepancy" or "comparison" only when comparing specific facts from at least two documents, and then every source MUST have factId set to a fact id from <facts_json>. Return an empty array when there is nothing to add.',
+    '- Every source documentId must appear in <facts_json>. Never cite an id that is not in the input.',
+    '- missingInformation: return an empty array. Missing fields are already in verifiedComparison.',
+    '- comparisonTable: return null. The table is built by code.',
+    '- Set severity to low, medium or high for discrepancies. Use null for comparisons and summary points unless severity is clear.',
     '- Return JSON only, matching the schema.',
     INJECTION_GUARD,
   ].join('\n');

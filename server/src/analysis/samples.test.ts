@@ -96,20 +96,22 @@ describe('synthetic sample set (samples/)', () => {
     expect(result.status).toBe('completed');
 
     // Planted discrepancies (names, addresses, licence details, revenue).
-    expect(find(result.findings, 'discrepancy', 'applicant')).toBeDefined(); // Rohan Mehta vs Rohan Mehra
-    expect(find(result.findings, 'discrepancy', 'address')).toBeDefined(); // Sector 21 vs Sector 12
-    expect(find(result.findings, 'discrepancy', 'licence_expiry')).toBeDefined(); // 2027 vs 2026
-    const revenue = find(result.findings, 'discrepancy', 'revenue_fy2025');
+    expect(find(result.findings, 'discrepancy', 'Applicant')).toBeDefined(); // Rohan Mehta vs Rohan Mehra
+    expect(find(result.findings, 'discrepancy', 'Registered address')).toBeDefined(); // Sector 21 vs Sector 12
+    expect(find(result.findings, 'discrepancy', 'Licence expiry date')).toBeDefined(); // 2027 vs 2026
+    const revenue = find(result.findings, 'discrepancy', 'Revenue FY2025');
     expect(revenue).toBeDefined(); // three different figures
     expect(new Set(revenue?.sources.map((s) => s.documentId)).size).toBe(3);
 
-    // The company name variant ("Pvt Ltd" vs "Private Limited") is consistent, not a discrepancy.
-    expect(find(result.findings, 'discrepancy', 'company')).toBeUndefined();
+    // The company name variant ("Pvt Ltd" vs "Private Limited") is consistent, not a discrepancy. It is
+    // reported as a low-severity match instead, because the same name is written two ways.
+    expect(find(result.findings, 'discrepancy', 'Company name')).toBeUndefined();
+    expect(find(result.findings, 'comparison', 'Company name')?.severity).toBe('low');
 
     // Missing information: co-director and revenue are absent from the KYC summary.
     const missing = result.missingInformation.map((f) => f.title);
-    expect(missing).toContain('co_director is missing from supporting_letter.txt, financials_fy2025.csv, kyc_summary.txt');
-    expect(missing.some((t) => t.startsWith('revenue_fy2025 is missing') && t.includes('kyc_summary.txt'))).toBe(true);
+    expect(missing).toContain('Co-director is missing from supporting_letter.txt, financials_fy2025.csv, kyc_summary.txt');
+    expect(missing.some((t) => t.startsWith('Revenue FY2025 is missing') && t.includes('kyc_summary.txt'))).toBe(true);
 
     // Provenance: every finding cites at least one document.
     for (const finding of [...result.findings, ...result.missingInformation]) {

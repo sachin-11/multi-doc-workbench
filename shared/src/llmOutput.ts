@@ -19,12 +19,18 @@ const FindingDraftSchema = FindingSchema.omit({
   isInterpretation: true,
 });
 
-/** Stage 2 (cross-document): operates on structured facts only, never on raw document text. */
+/**
+ * Stage 2 (cross-document): operates on structured facts only, never on raw document text.
+ *
+ * The comparison table and the missing-information list are computed in code, and the prompt tells the model
+ * to leave them empty. A model that is told to leave something empty often omits the key, so every field has a
+ * default. A reply without those keys is valid, instead of failing the whole analysis on a field nobody uses.
+ */
 export const CrossDocumentAnalysisOutputSchema = z.object({
-  findings: z.array(FindingDraftSchema),
-  missingInformation: z.array(FindingDraftSchema),
-  comparisonTable: ComparisonTableSchema.nullable(),
-  summary: z.string().max(4000).nullable(),
+  findings: z.array(FindingDraftSchema).default([]),
+  missingInformation: z.array(FindingDraftSchema).default([]),
+  comparisonTable: ComparisonTableSchema.nullable().default(null),
+  summary: z.string().max(4000).nullable().default(null),
 });
 export type CrossDocumentAnalysisOutput = z.infer<typeof CrossDocumentAnalysisOutputSchema>;
 

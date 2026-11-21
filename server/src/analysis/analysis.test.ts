@@ -5,11 +5,9 @@ import {
   AnalysisListResponseSchema,
   AnalysisResultSchema,
   type AnalysisResult,
-  type DocumentMeta,
-  type ParsedDocument,
 } from '@mdw/shared';
 import { createTestApp } from '../testing/testApp.js';
-import { chunkText, normalizeText } from '../processing/text.js';
+import { insertProcessed } from '../testing/documents.js';
 import { createMockProvider } from '../llm/mockProvider.js';
 import { LLMRequestError, type LLMProvider, type StructuredRequest, type StructuredResult } from '../llm/types.js';
 import { SCHEMA_NAMES } from '../llm/prompts.js';
@@ -29,40 +27,6 @@ const TEXT_B = ['Applicant Name: Rahul Varma', 'Annual Revenue: INR 42,00,000'].
 const INSTRUCTION = 'Highlight discrepancies in names, licence details and revenue';
 
 type Ctx = ReturnType<typeof createTestApp>;
-
-/** Inserts a document as the processing pipeline would leave it: processed with stored text and chunks. */
-function insertProcessed(ctx: Ctx, name: string, text: string): string {
-  const id = randomUUID();
-  const meta: DocumentMeta = {
-    id,
-    originalName: name,
-    sanitizedName: name,
-    mimeType: 'text/plain',
-    format: 'txt',
-    sizeBytes: Buffer.byteLength(text, 'utf8'),
-    status: 'uploaded',
-    errorMessage: null,
-    charCount: 0,
-    wasTruncated: false,
-    createdAt: NOW,
-  };
-  ctx.documents.insert(meta, null);
-  const normalized = normalizeText(text);
-  const parsed: ParsedDocument = {
-    documentId: id,
-    format: 'txt',
-    text: normalized,
-    pages: null,
-    rows: null,
-    columns: null,
-    charCount: normalized.length,
-    wasTruncated: false,
-    chunks: chunkText(normalized),
-    warnings: [],
-  };
-  ctx.documents.saveParsed(id, parsed);
-  return id;
-}
 
 /** Inserts a document that never reached "processed". */
 function insertFailed(ctx: Ctx, name: string): string {
@@ -124,19 +88,25 @@ describe('analysis engine (end to end, MOCK provider, in-memory DB)', () => {
       expect(normalizeForMatch(textOf[fact.documentId] ?? '')).toContain(normalizeForMatch(fact.sourceSnippet));
     }
 
-    // Revenue discrepancy cites BOTH documents.
-    const revenue = result.findings.find((f) => f.type === 'discrepancy' && f.title.includes('revenue'));
+    // Revenue discrepancy cites BOTH documents, and its text shows each document's own value.
+    const revenue = result.findings.find((f) => f.type === 'discrepancy' && f.title.startsWith('Revenue'));
     expect(revenue).toBeDefined();
     const revenueDocs = new Set(revenue?.sources.map((s) => s.documentId));
     expect(revenueDocs).toEqual(new Set([docA, docB]));
+    expect(revenue?.description).toContain('application.txt: "INR 50,00,000"');
+    expect(revenue?.description).toContain('financials.txt: "INR 42,00,000"');
 
     // Name discrepancy is also reported (Verma vs Varma).
-    expect(result.findings.some((f) => f.type === 'discrepancy' && f.title.includes('applicant'))).toBe(true);
+    expect(result.findings.some((f) => f.type === 'discrepancy' && f.title.startsWith('Applicant'))).toBe(true);
 
     // Licence is only in document A, so the missing-information report cites document B.
-    const licence = result.missingInformation.find((f) => f.title.includes('licence'));
+    const licence = result.missingInformation.find((f) => f.title.startsWith('Licence number'));
     expect(licence).toBeDefined();
     expect(licence?.sources.map((s) => s.documentId)).toContain(docB);
+
+    // The comparison table is always built for two or more documents, with every document as a column.
+    expect(result.comparisonTable?.columns).toEqual([docA, docB]);
+    expect(result.comparisonTable?.rows.find((r) => r.field === 'Revenue')?.consistent).toBe(false);
 
     // Provenance: no citation points outside this analysis, and every finding is marked as interpretation.
     const allowed = new Set(result.documentIds);
@@ -195,7 +165,7 @@ describe('analysis engine (end to end, MOCK provider, in-memory DB)', () => {
     expect(result.warnings.some((w) => w.includes('broken.txt') && w.includes('excluded'))).toBe(true);
     expect(result.perDocumentFacts[docBroken]).toEqual([]);
     // The two healthy documents still produce the cross-document revenue discrepancy.
-    expect(result.findings.some((f) => f.title.includes('revenue'))).toBe(true);
+    expect(result.findings.some((f) => f.title.startsWith('Revenue'))).toBe(true);
     const cited = result.findings.flatMap((f) => f.sources.map((s) => s.documentId));
     expect(cited).not.toContain(docBroken);
   });

@@ -59,6 +59,10 @@ function squash(text: string): string {
   return text.replace(/\s+/g, ' ').trim();
 }
 
+function escapeRegExp(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 function findByPrefix(findings: Finding[], type: Finding['type'], titlePrefix: string): Finding | undefined {
   return findings.find((f) => f.type === type && f.title.startsWith(titlePrefix));
 }
@@ -147,19 +151,80 @@ describe('end-to-end provenance on samples/ (HTTP, MOCK provider)', () => {
     }
   });
 
-  it('finds the revenue discrepancy and cites at least application_form and supporting_letter', () => {
-    const revenue = findByPrefix(analysis.findings, 'discrepancy', 'revenue_fy2025');
+  it('finds the revenue discrepancy with ALL documents that state revenue, and all three values', () => {
+    const revenue = findByPrefix(analysis.findings, 'discrepancy', 'Revenue FY2025');
     expect(revenue, 'revenue discrepancy').toBeDefined();
     const cited = new Set(revenue?.sources.map((s) => s.documentId));
+    for (const name of ['application_form.pdf', 'supporting_letter.txt', 'financials_fy2025.csv']) {
+      expect(cited.has(docs[name]?.id ?? ''), `${name} should be cited`).toBe(true);
+    }
+    // The KYC summary states no revenue ("No revenue figure is recorded"), so it is a gap, not a source of a value.
+    expect(cited.has(docs['kyc_summary.txt']?.id ?? '')).toBe(false);
+    for (const value of ['4,80,00,000', '3,95,00,000', '4,10,00,000']) {
+      expect(revenue?.description, `revenue value ${value}`).toContain(value);
+    }
+  });
+
+  it('finds the applicant name discrepancy and pairs each document with its OWN value (Mehta vs Mehra)', () => {
+    const name = findByPrefix(analysis.findings, 'discrepancy', 'Applicant');
+    expect(name, 'applicant name discrepancy').toBeDefined();
+    expect(name?.description).toContain('application_form.pdf: "Rohan Mehta"');
+    expect(name?.description).toContain('supporting_letter.txt: "Rohan Mehra"');
+    // The KYC summary lists the director as Rohan Mehta, so it is part of the same finding.
+    expect(name?.description).toContain('kyc_summary.txt: "Rohan Mehta"');
+    const cited = new Set(name?.sources.map((s) => s.documentId));
     expect(cited.has(docs['application_form.pdf']?.id ?? '')).toBe(true);
     expect(cited.has(docs['supporting_letter.txt']?.id ?? '')).toBe(true);
   });
 
-  it('finds the applicant name discrepancy (Mehta vs Mehra)', () => {
-    const name = findByPrefix(analysis.findings, 'discrepancy', 'applicant');
-    expect(name, 'applicant name discrepancy').toBeDefined();
-    expect(name?.description).toMatch(/Mehta/);
-    expect(name?.description).toMatch(/Mehra/);
+  it('grounds every discrepancy: each cited document is paired with the value of its own cited fact', () => {
+    const factById = new Map(Object.values(analysis.perDocumentFacts).flat().map((f) => [f.id, f]));
+    const nameOf = (id: string) => Object.values(docs).find((d) => d.id === id)?.originalName ?? '';
+    const discrepancies = analysis.findings.filter((f) => f.type === 'discrepancy');
+    expect(discrepancies.length).toBeGreaterThanOrEqual(4);
+
+    for (const finding of discrepancies) {
+      for (const source of finding.sources) {
+        const fact = factById.get(source.factId ?? '');
+        expect(fact, `"${finding.title}": every source cites a fact`).toBeDefined();
+        expect(fact?.documentId).toBe(source.documentId);
+        const pattern = new RegExp(`${escapeRegExp(nameOf(source.documentId))}: [^;]*"${escapeRegExp(fact?.value ?? '')}"`);
+        expect(finding.description, `"${finding.title}" must quote ${nameOf(source.documentId)}'s own value`).toMatch(pattern);
+      }
+    }
+  });
+
+  it('reports the co-director as missing from kyc_summary.txt, citing the form that states it', () => {
+    const missing = analysis.missingInformation.find((f) => f.title.startsWith('Co-director'));
+    expect(missing, 'co-director missing').toBeDefined();
+    expect(missing?.title).toContain('kyc_summary.txt');
+    const form = missing?.sources.find((s) => s.documentId === docs['application_form.pdf']?.id);
+    expect(form?.factId, 'the form that states the co-director is cited with its fact').not.toBeNull();
+  });
+
+  it('reports the licence as missing from financials_fy2025.csv', () => {
+    const missing = analysis.missingInformation.find((f) => f.title.startsWith('Licence number'));
+    expect(missing, 'licence missing').toBeDefined();
+    expect(missing?.title).toContain('financials_fy2025.csv');
+  });
+
+  it('does not report prior-year figures or unimportant fields as missing information', () => {
+    const titles = analysis.missingInformation.map((f) => f.title);
+    expect(titles.some((t) => t.startsWith('Revenue FY2024'))).toBe(false);
+    expect(titles.some((t) => /cash|application_date|tenure/i.test(t))).toBe(false);
+    // Important fields only: names, address, licence number and expiry, revenue, co-director.
+    expect(analysis.missingInformation.length).toBeLessThanOrEqual(10);
+  });
+
+  it('builds the comparison table with every document as a column', () => {
+    const table = analysis.comparisonTable;
+    expect(table, 'comparison table').not.toBeNull();
+    expect(new Set(table?.columns)).toEqual(new Set(documentIds()));
+    const revenueRow = table?.rows.find((r) => r.field === 'Revenue FY2025');
+    expect(revenueRow?.consistent).toBe(false);
+    // Form, letter and CSV state a revenue. The KYC summary does not.
+    expect(Object.values(revenueRow?.values ?? {}).filter((v) => v !== null)).toHaveLength(3);
+    expect(revenueRow?.values[docs['kyc_summary.txt']?.id ?? '']).toBeNull();
   });
 
   it('reports at least one missing-information finding', () => {
@@ -220,5 +285,11 @@ describe('invalid samples in the same upload as valid ones (HTTP)', () => {
     for (const rejected of body.rejected) {
       expect(rejected.reason.length).toBeGreaterThan(0);
     }
+
+    // Consistent rule: rejected files are reported in the response only. The document list holds accepted files.
+    const list = await request(ctx.app).get('/api/documents');
+    expect((list.body as { documents: { originalName: string }[] }).documents.map((d) => d.originalName)).toEqual([
+      'kyc_summary.txt',
+    ]);
   });
 });

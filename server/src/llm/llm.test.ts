@@ -78,46 +78,31 @@ describe('mock extraction', () => {
   });
 });
 
-describe('mock cross-document analysis (end to end through the prompt)', () => {
-  it('turns two documents with different revenue into one discrepancy citing both documentIds', async () => {
+describe('mock cross-document analysis (summary only, through the prompt)', () => {
+  const docs = (factsA: ExtractedFact[], factsB: ExtractedFact[]) => [
+    { documentId: DOC_A, originalName: 'application.txt', facts: factsA },
+    { documentId: DOC_B, originalName: 'financials.csv', facts: factsB },
+  ];
+
+  it('writes its summary from the verified comparison and returns no findings, table or missing items', async () => {
     const factsA = toStoredFacts(DOC_A, extractFactsFromText(FACT_TEXT_A));
     const factsB = toStoredFacts(DOC_B, extractFactsFromText(FACT_TEXT_B));
     const prompt = buildCrossDocumentAnalysisPrompt({
       instruction: 'Highlight discrepancies in names and revenue.',
-      documents: [
-        { documentId: DOC_A, originalName: 'application.txt', facts: factsA },
-        { documentId: DOC_B, originalName: 'financials.csv', facts: factsB },
-      ],
-    });
-
-    const provider = createMockProvider();
-    const { data } = await provider.generateStructured({
-      system: prompt.system,
-      user: prompt.user,
-      schema: CrossDocumentAnalysisOutputSchema,
-      schemaName: SCHEMA_NAMES.crossDocument,
-    });
-
-    const revenue = data.findings.find((f) => f.type === 'discrepancy' && f.title.startsWith('revenue_2025'));
-    expect(revenue).toBeDefined();
-    const cited = new Set(revenue?.sources.map((s) => s.documentId));
-    expect(cited).toEqual(new Set([DOC_A, DOC_B]));
-    expect(revenue?.severity).toBe('high');
-
-    expect(data.comparisonTable?.columns).toEqual([DOC_A, DOC_B]);
-    expect(data.comparisonTable?.rows.find((r) => r.field === 'revenue_2025')?.consistent).toBe(false);
-    expect(data.summary).toContain('discrepancy');
-  });
-
-  it('reports a field present in only one document as missing information, citing both documents', async () => {
-    const factsA = toStoredFacts(DOC_A, extractFactsFromText('Licence Number: LIC-778'));
-    const factsB = toStoredFacts(DOC_B, extractFactsFromText('Revenue 2025: 150000'));
-    const prompt = buildCrossDocumentAnalysisPrompt({
-      instruction: 'Find missing information.',
-      documents: [
-        { documentId: DOC_A, originalName: 'application.txt', facts: factsA },
-        { documentId: DOC_B, originalName: 'financials.csv', facts: factsB },
-      ],
+      documents: docs(factsA, factsB),
+      verifiedComparison: {
+        discrepancies: [
+          {
+            field: 'Revenue FY2025',
+            values: [
+              { document: 'application.txt', value: '120000' },
+              { document: 'financials.csv', value: '150000' },
+            ],
+          },
+        ],
+        missing: [{ field: 'Licence number', presentIn: ['application.txt'], absentFrom: ['financials.csv'] }],
+        consistentFields: ['Company name'],
+      },
     });
 
     const { data } = await createMockProvider().generateStructured({
@@ -127,9 +112,31 @@ describe('mock cross-document analysis (end to end through the prompt)', () => {
       schemaName: SCHEMA_NAMES.crossDocument,
     });
 
-    const missing = data.missingInformation.find((f) => f.title.startsWith('licence'));
-    expect(missing).toBeDefined();
-    expect(missing?.sources.map((s) => s.documentId).sort()).toEqual([DOC_A, DOC_B].sort());
+    // Code owns the comparison. The mock, like a real model, only writes the summary.
+    expect(data.findings).toEqual([]);
+    expect(data.missingInformation).toEqual([]);
+    expect(data.comparisonTable).toBeNull();
+    expect(data.summary).toContain('Compared 2 documents');
+    expect(data.summary).toContain('Revenue FY2025');
+    expect(data.summary).toContain('Licence number');
+  });
+
+  it('still returns a short summary when no verified comparison is given', async () => {
+    const prompt = buildCrossDocumentAnalysisPrompt({
+      instruction: 'Compare.',
+      documents: docs(
+        toStoredFacts(DOC_A, extractFactsFromText(FACT_TEXT_A)),
+        toStoredFacts(DOC_B, extractFactsFromText(FACT_TEXT_B)),
+      ),
+    });
+    const { data } = await createMockProvider().generateStructured({
+      system: prompt.system,
+      user: prompt.user,
+      schema: CrossDocumentAnalysisOutputSchema,
+      schemaName: SCHEMA_NAMES.crossDocument,
+    });
+    expect(data.summary).toContain('2 document');
+    expect(data.findings).toEqual([]);
   });
 });
 

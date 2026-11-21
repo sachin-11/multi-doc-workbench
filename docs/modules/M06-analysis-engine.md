@@ -52,3 +52,12 @@ Run the user's analysis prompt in two stages without ever merging documents into
 - **Documents used by an analysis cannot be deleted** (`409 DOCUMENT_IN_USE`). This is a change to the M3 delete route. Deleting would cascade into `finding_sources` and leave findings with no source.
 - **The live OpenAI path has not been run against an endpoint** (carried over from M5). The smoke test used the MOCK provider.
 - **Facts from stage A are saved in the final transaction.** A crash mid-run leaves the analysis in `running` with nothing saved. Startup recovery is not implemented.
+
+## Update after M10: deterministic comparison and value grounding
+Browser testing with a real model showed two problems: a finding attached a value to the wrong document ("application_form.pdf states Rohan Mehra" when its fact is "Rohan Mehta"), and the model left some documents and fields out of its own comparison. The flow above changed in these ways, without changing the two-stage architecture:
+
+- **Comparison in code.** `analysis/comparison.ts` builds the comparison table, the discrepancies and the missing-information items from the facts. `analysis/normalize.ts` normalises keys (synonyms, periods) and values (Indian number format, currency, dates, company suffixes). A statement of absence such as "No revenue figure is recorded" is a gap, not a value.
+- **Stage B is for the summary and extra findings.** The prompt carries the verified comparison. The model's own table and missing-information items are ignored.
+- **Value grounding** (`analysis/grounding.ts`): a model discrepancy or comparison is kept only if every source cites a fact of its own document and the cited values really differ (or agree). Its wording is rebuilt from the facts. Otherwise it is dropped with a warning.
+- **Schema tolerance.** The cross-document output schema has defaults, because a model told to leave a field empty often omits the key.
+- Temperature 0 was already set on every call. A test now locks it in.

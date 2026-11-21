@@ -33,7 +33,7 @@ LLM_BASE_URL=https://api.openai.com/v1  # or another compatible base URL
 LLM_MODEL=gpt-4o-mini                   # or any model that supports JSON output
 ```
 
-The real path (`openaiProvider.ts`) is tested only through a fake transport. It has not been run against a live endpoint in this repo. See [Known limitations](#known-limitations).
+The real path (`openaiProvider.ts`) is covered by automated tests only through a fake transport. It was run by hand against OpenAI (`gpt-4o-mini`) on the sample set, and the results are in the [Demo](#demo-in-60-seconds). See [Known limitations](#known-limitations).
 
 ### Troubleshooting
 
@@ -68,7 +68,7 @@ The database defaults to `./data/app.db` (created on first start). Use `DB_PATH=
    - **Missing information:** the co-director and the revenue figure are missing from the KYC summary.
    - **Source badges:** every finding shows one badge per supporting document. Hover a badge to see the quoted snippet. Click it to jump to that fact.
 4. **Copy or download.** Use *Copy as Markdown*, *Copy JSON* or *Download .md*. All three come from the same server export.
-5. **See graceful rejection.** Upload the files in [samples/invalid_samples/](samples/invalid_samples/): `fake.pdf` (renamed text), `empty.txt`, `script.exe` and `notes.docx`. Each is rejected with a reason and never executed. Uploading them together with a valid file accepts only the valid one.
+5. **See graceful rejection.** Upload the files in [samples/invalid_samples/](samples/invalid_samples/): `fake.pdf` (renamed text), `empty.txt`, `script.exe` and `notes.docx`. Each is rejected with a reason and never executed. Uploading them together with a valid file accepts only the valid one. Rejected files are shown once in the alert and are not added to the document list.
 
 The MOCK provider finds the four discrepancies and the missing items above. Three items need a real model to judge: the licence is probably already expired as of today, the revenue is described as "provisional", and the existing EMI affects the request. The MOCK does not assert those.
 
@@ -87,9 +87,10 @@ flowchart LR
     UV["Upload validation<br/>extension, MIME, magic bytes,<br/>UTF-8 check, size, count, filename"]
     BUF[("In-memory buffers<br/>TTL, freed after processing")]
     PROC["Processing queue<br/>parser registry: PDF, TXT, CSV"]
-    AE["Analysis engine<br/>Stage A per document and chunk<br/>Stage B cross-document on facts"]
+    AE["Analysis engine<br/>Stage A per document and chunk<br/>Stage B summary and extra findings"]
+    DET["Deterministic comparison<br/>table, discrepancies, missing items<br/>(code, no model)"]
     LLM["LLM provider<br/>OpenAI-compatible or MOCK"]
-    G["Provenance guards<br/>drop unknown ids, verify snippets"]
+    G["Guards<br/>drop unknown ids, verify snippets,<br/>ground values in facts"]
   end
 
   DB[("SQLite<br/>documents, analyses, facts,<br/>findings, finding_sources")]
@@ -99,8 +100,11 @@ flowchart LR
   PROC -- "extracted text" --> DB
   API --> AE
   AE -- "Stage A: one chunk at a time" --> LLM
-  AE -- "Stage B: facts only" --> LLM
-  AE --> G --> DB
+  AE -- "facts only" --> DET
+  AE -- "Stage B: facts + verified comparison" --> LLM
+  LLM --> G
+  DET --> DB
+  G --> DB
   DB --> API
   API -- "results and export" --> UI
 ```
@@ -109,9 +113,13 @@ flowchart LR
 
 1. **Resolve documents.** Only processed documents are used. Failed or unready documents are skipped with a warning. The request returns 409 only when no document is usable.
 2. **Stage A, per document and per chunk.** Each document is split into chunks of about 4,000 characters with 200 characters of overlap. Each chunk goes to the model in its own prompt, and the model returns facts. Each fact carries a `documentId` and a verbatim `sourceSnippet` (at most 200 characters). Documents run in parallel (concurrency 3). A failing document or chunk becomes a warning, and the run continues.
-3. **Stage B, across documents.** One prompt receives only the structured facts, grouped under their `documentId`. It never receives raw document text. The model returns findings (discrepancies, summary points, missing information, comparison rows, key-value items). Each finding lists its sources.
-4. **Guards, for any provider.** `validateProvenance` removes unknown document ids. `enforceFactOwnership` drops a fact id that belongs to a different document. Snippets missing from their document cap confidence at 0.3 and add a warning. A finding with no valid source is dropped.
-5. **Persist in one transaction.** Facts, findings, sources, summary, table and warnings are saved together. A run that fails after Stage A keeps the facts already saved, and its status is `failed`.
+3. **Deterministic comparison (code, no model).** The comparison table, the discrepancies and the missing-information items are computed from the facts, so none of them can contain a value that no document states. Fact keys are normalised through a synonym map (`applicant_name`, `director_name` and a bare `name` are one field; `annual_revenue_2025` and `revenue_fy2025` are one field), and values are normalised too (Indian digit grouping, `INR`/`Rs`/`₹`, "crore" and "lakh", date formats, "Pvt Ltd" = "Private Limited", case and spacing). Facts are grouped by normalised key across all documents:
+   - the **table** has every document as a column;
+   - a **discrepancy** lists *all* documents that state the field, each with its own value. A difference that is only formatting is not a discrepancy. A company name written two ways is a low-severity match;
+   - **missing information** covers important fields (names, address, licence number and expiry, revenue, co-director) that some documents state and others do not. A statement such as "No revenue figure is recorded" counts as a gap, never as a value.
+4. **Stage B, the model.** One prompt receives the structured facts grouped by `documentId` and the verified comparison. It never receives raw document text. The model writes the **summary** and may add **extra findings** relevant to the instruction. Its own table and missing-information items are ignored. Temperature is 0 on every model call.
+5. **Guards, for any provider.** `validateProvenance` removes unknown document ids. `enforceFactOwnership` drops a fact id that belongs to a different document. Snippets missing from their document cap confidence at 0.3 and add a warning. **Value grounding** then checks every model discrepancy or comparison: each source must cite a fact of its own document, the cited values must really differ (or agree), and the wording is rebuilt from the facts' actual values. A finding that fails is dropped with a warning. A finding with no valid source is dropped.
+6. **Persist in one transaction.** Facts, findings, sources, summary, table and warnings are saved together. A run that fails after Stage A keeps the facts already saved, and its status is `failed`.
 
 ### Data model
 
@@ -180,15 +188,15 @@ Legend: ✅ done and tested · ⚠️ partial, see note · ❌ not done
 | 3 | Image OCR (optional) | ❌ | PNG and JPEG pass validation, then get status `unsupported`. No OCR library is included |
 | 4 | Extract and ingest content per document | ✅ | PDF via `pdf-parse` (page count, empty or scanned PDFs fail with a clear message). TXT as strict UTF-8. CSV as labelled text (`Row n: column=value; ...`), capped at 500 rows with a warning |
 | 5 | User-defined analysis prompt | ✅ | 5 to 2,000 characters, with example chips. The MOCK ignores the free text (see Known limitations) |
-| 6 | Analyse documents independently and collectively | ✅ | Stage A is per document and per chunk. Stage B is cross-document, on facts only |
-| 7 | Comparison table | ✅ | Fields as rows, documents as columns. Inconsistent rows are marked |
+| 6 | Analyse documents independently and collectively | ✅ | Stage A is per document and per chunk. The comparison is cross-document and runs on facts only |
+| 7 | Comparison table | ✅ | Built in code for two or more documents. Fields as rows, every document a column. Rows where documents disagree are marked |
 | 8 | Consolidated summary | ✅ | Summary tab |
-| 9 | Discrepancy list | ✅ | Severity and sources per item |
-| 10 | Missing-information report | ✅ | Reported as "missing from ..." per field. The MOCK's list is broad (see Known limitations) |
+| 9 | Discrepancy list | ✅ | Computed from the facts. Every document that states the field is cited with its own value |
+| 10 | Missing-information report | ✅ | Important fields only, reported as "missing from ...", citing the documents that state the field |
 | 11 | Key-value extraction | ✅ | "Extracted facts" tab, grouped by document |
 | 12 | Every finding cites its documents (provenance) | ✅ | Enforced by zod and the repository, and by server guards for any provider |
 | 13 | Copy-output button | ✅ | Copy as Markdown, copy JSON, download `.md`. Falls back to a read-only text area if the clipboard is blocked |
-| 14 | Graceful handling of unsupported, unreadable or invalid files | ✅ | Per-file rejection with a code and a reason. A corrupt PDF becomes `failed` with a readable message. The rest of the batch continues |
+| 14 | Graceful handling of unsupported, unreadable or invalid files | ✅ | A file that fails validation is rejected with a code and a reason, shown once, and is not added to the document list. A file that is accepted but cannot be read (corrupt PDF, image) is listed as `failed` or `unsupported` with a readable message. The rest of the batch continues |
 | 15 | Synthetic sample documents only | ✅ | Fictional company, people and identifiers. See [samples/README.md](samples/README.md) |
 
 ### Engineering expectations
@@ -206,7 +214,7 @@ Legend: ✅ done and tested · ⚠️ partial, see note · ❌ not done
 | Secure file handling | ✅ | Memory only, no disk writes, no execution |
 | Proper error handling | ✅ | One error envelope. No stack traces or internal details to the client |
 | Large content: chunking and truncation with a visible note | ✅ | Chunks and a per-document character cap. The warning is shown |
-| Automated tests (vitest) | ✅ | 147 tests in 19 files, all offline. See [Testing](#testing) |
+| Automated tests (vitest) | ✅ | 240 tests in 25 files, all offline. See [Testing](#testing) |
 | Small, clear commits | ✅ | One commit per module, conventional messages (see the commit history) |
 | Lint | ❌ | ESLint is not configured. `npm run check` is typecheck plus tests |
 
@@ -243,8 +251,8 @@ Legend: ✅ done and tested · ⚠️ partial, see note · ❌ not done
 
 **Models and quality**
 - **The MOCK is heuristic.** It finds labelled lines, CSV pairs, currency, email and ISO dates. It matches labels by a fixed list of filler words and aliases, not by meaning. It does not compare dates with today, does not read prose qualifiers ("provisional"), and does not follow the instruction text.
-- **The MOCK's missing-information list is noisy.** It reports a field as missing whenever any document in the run lacks it. On the sample set it returns 21 entries. The two planted gaps (co-director and KYC revenue) are among them, but so are real-looking gaps that are not planted, such as `cash_and_equivalents_fy2025` and `application_date`. A real model would filter these; the MOCK does not.
-- **The real OpenAI path is untested live.** It is covered by a fake transport only, so response shape, rate limits and cost are unverified against a real endpoint.
+- **The comparison is only as good as the extraction and the synonym map.** Keys are matched through a fixed synonym map and token rules, not by meaning. A field named in an unusual way is compared only with documents that use the same key. The applicant, the director and a bare `name` are treated as one person field, and documents agree when their sets of names overlap. Missing-information checks cover only the important fields listed above.
+- **The real OpenAI path is checked by hand, not by automated tests.** It was run against `gpt-4o-mini` on the sample set and produced the expected discrepancies. The automated suite uses a fake transport, so response shape, rate limits and cost are not covered by CI.
 - **Provenance catches fabricated citations, not wrong judgements.** A snippet is checked against its document, but a conclusion that misreads the document can still pass.
 
 **Scope**
@@ -306,7 +314,7 @@ If this went to production, I would change these, in roughly this order:
 | Suite | Files | Tests | Covers |
 |---|---|---|---|
 | shared | 1 | 8 | Provenance at the contract level: findings need sources, facts need a `documentId` and a snippet |
-| server | 16 | 137 | Upload validation (including invalid samples), parsers and their error states, chunking and truncation, buffer TTL, repositories, MOCK extraction and analysis, provenance and fact-ownership guards, OpenAI client with a fake transport (repair, retry, no retry on 400), prompt builders (no merged prompt, injection guard), analysis engine (partial failure, timeout, export), HTTP routes and error envelopes, config validation |
+| server | 22 | 230 | Upload validation (including invalid samples), parsers and their error states, chunking and truncation, buffer TTL, repositories, MOCK extraction and analysis, provenance and fact-ownership guards, key and value normalisation, the deterministic comparison, value grounding of model findings (including a model that swaps values between documents), OpenAI client with a fake transport (repair, retry, no retry on 400), prompt builders (no merged prompt, injection guard), analysis engine (partial failure, timeout, export), HTTP routes and error envelopes, config validation |
 | client | 2 | 2 | Source badges and the AI tag on a finding card; the main flow in jsdom (upload, polling, example chip, analyse, copy, source click) |
 
 **The flagship test** is [`server/test/analysis.samples.e2e.test.ts`](server/test/analysis.samples.e2e.test.ts). It uploads the four files in `samples/` in one multipart request, waits for processing, runs the analysis over HTTP, and exports markdown. It checks that:
