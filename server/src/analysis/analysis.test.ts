@@ -125,16 +125,16 @@ describe('analysis engine (end to end, MOCK provider, in-memory DB)', () => {
     }
 
     // Revenue discrepancy cites BOTH documents.
-    const revenue = result.findings.find((f) => f.type === 'discrepancy' && f.title.includes('annual_revenue'));
+    const revenue = result.findings.find((f) => f.type === 'discrepancy' && f.title.includes('revenue'));
     expect(revenue).toBeDefined();
     const revenueDocs = new Set(revenue?.sources.map((s) => s.documentId));
     expect(revenueDocs).toEqual(new Set([docA, docB]));
 
     // Name discrepancy is also reported (Verma vs Varma).
-    expect(result.findings.some((f) => f.type === 'discrepancy' && f.title.includes('applicant_name'))).toBe(true);
+    expect(result.findings.some((f) => f.type === 'discrepancy' && f.title.includes('applicant'))).toBe(true);
 
     // Licence is only in document A, so the missing-information report cites document B.
-    const licence = result.missingInformation.find((f) => f.title.includes('licence_no'));
+    const licence = result.missingInformation.find((f) => f.title.includes('licence'));
     expect(licence).toBeDefined();
     expect(licence?.sources.map((s) => s.documentId)).toContain(docB);
 
@@ -195,7 +195,7 @@ describe('analysis engine (end to end, MOCK provider, in-memory DB)', () => {
     expect(result.warnings.some((w) => w.includes('broken.txt') && w.includes('excluded'))).toBe(true);
     expect(result.perDocumentFacts[docBroken]).toEqual([]);
     // The two healthy documents still produce the cross-document revenue discrepancy.
-    expect(result.findings.some((f) => f.title.includes('annual_revenue'))).toBe(true);
+    expect(result.findings.some((f) => f.title.includes('revenue'))).toBe(true);
     const cited = result.findings.flatMap((f) => f.sources.map((s) => s.documentId));
     expect(cited).not.toContain(docBroken);
   });

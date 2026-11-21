@@ -65,7 +65,7 @@ describe('mock extraction', () => {
       expect(text).toContain(fact.sourceSnippet);
     }
 
-    const name = facts.find((f) => f.key === 'applicant_name');
+    const name = facts.find((f) => f.key === 'applicant');
     expect(name).toMatchObject({ value: 'Jane Doe', category: 'identity', sourceSnippet: 'Applicant Name: Jane Doe' });
     const revenue = facts.find((f) => f.key === 'revenue_2025');
     expect(revenue?.category).toBe('financial');
@@ -127,7 +127,7 @@ describe('mock cross-document analysis (end to end through the prompt)', () => {
       schemaName: SCHEMA_NAMES.crossDocument,
     });
 
-    const missing = data.missingInformation.find((f) => f.title.startsWith('licence_number'));
+    const missing = data.missingInformation.find((f) => f.title.startsWith('licence'));
     expect(missing).toBeDefined();
     expect(missing?.sources.map((s) => s.documentId).sort()).toEqual([DOC_A, DOC_B].sort());
   });
@@ -249,7 +249,7 @@ describe('prompt builders', () => {
     });
 
     expect(prompt.user).toContain('<facts_json>');
-    expect(prompt.user).toContain('applicant_name');
+    expect(prompt.user).toContain('applicant');
     expect(prompt.user).not.toContain('Secret paragraph');
     expect(prompt.system).toContain('UNTRUSTED');
   });

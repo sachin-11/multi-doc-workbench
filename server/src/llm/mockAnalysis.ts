@@ -15,8 +15,16 @@ import type { CrossDocumentPayload } from './prompts.js';
 
 type FindingDraft = Omit<Finding, 'id' | 'analysisId' | 'isInterpretation'>;
 
+/**
+ * Normalises a value for comparison: case, spacing, currency symbols and Indian digit grouping ("4,80,00,000")
+ * are ignored, and company suffix variants are expanded ("Pvt Ltd" = "Private Limited").
+ */
 export function normalizeForComparison(value: string): string {
-  return value.replace(/[₹$£€,\s]/g, '').toLowerCase();
+  return value
+    .toLowerCase()
+    .replace(/\bpvt\b\.?/g, 'private')
+    .replace(/\bltd\b\.?/g, 'limited')
+    .replace(/[₹$£€,\s.]/g, '');
 }
 
 function sourceFor(doc: { documentId: string }, fact: ExtractedFact): FindingSource {
