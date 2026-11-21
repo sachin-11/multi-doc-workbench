@@ -2,9 +2,11 @@ import { randomUUID } from 'node:crypto';
 import { Router } from 'express';
 import multer from 'multer';
 import {
+  DEFAULT_LIMITS,
+  DocumentDetailSchema,
   DocumentIdSchema,
   DocumentListResponseSchema,
-  DocumentMetaSchema,
+  DocumentTextResponseSchema,
   UploadResponseSchema,
   type DocumentMeta,
   type RejectedFile,
@@ -13,13 +15,13 @@ import { AppError } from '../lib/errors.js';
 import { logger } from '../lib/logger.js';
 import type { DocumentsRepo } from '../db/repositories/documentsRepo.js';
 import type { BufferStore } from '../storage/bufferStore.js';
+import type { DocumentProcessor } from '../processing/index.js';
 import { validateUpload, type IncomingFile } from '../upload/validation.js';
 
 export interface DocumentsRouteDeps {
   documents: DocumentsRepo;
   buffers: BufferStore;
-  /** Processing hook (M4). Called once per accepted document. */
-  enqueueProcessing: (documentId: string) => void;
+  processor: Pick<DocumentProcessor, 'enqueue'>;
   limits: { maxFiles: number; maxFileSizeMb: number };
 }
 
@@ -37,8 +39,14 @@ function requireMultipart(req: { is(type: string): string | false | null }): voi
 }
 
 export function createDocumentsRouter(deps: DocumentsRouteDeps): Router {
-  const { documents, buffers, enqueueProcessing, limits } = deps;
+  const { documents, buffers, processor, limits } = deps;
   const router = Router();
+
+  const findOr404 = (id: string) => {
+    const record = documents.getById(id);
+    if (!record) throw new AppError(404, 'DOCUMENT_NOT_FOUND', 'Document not found.');
+    return record;
+  };
 
   // Memory storage only. Files never touch disk, and user-supplied names are never used as paths.
   const upload = multer({
@@ -86,7 +94,7 @@ export function createDocumentsRouter(deps: DocumentsRouteDeps): Router {
         if (result.ok) {
           buffers.put(result.meta.id, file.buffer);
           accepted.push(result.meta);
-          enqueueProcessing(result.meta.id);
+          processor.enqueue(result.meta.id);
         } else {
           rejected.push({
             originalName: result.meta.originalName,
@@ -106,13 +114,36 @@ export function createDocumentsRouter(deps: DocumentsRouteDeps): Router {
     res.json(DocumentListResponseSchema.parse({ documents: documents.list() }));
   });
 
-  // GET /api/documents/:id
+  // GET /api/documents/:id: metadata, parse info, warnings and a short preview. Never the full text.
   router.get('/:id', (req, res) => {
-    const id = parseId(req.params.id);
-    const record = documents.getById(id);
-    if (!record) throw new AppError(404, 'DOCUMENT_NOT_FOUND', 'Document not found.');
-    // Zod strips extractedText because it is not part of DocumentMeta.
-    res.json(DocumentMetaSchema.parse(record));
+    const record = findOr404(parseId(req.params.id));
+    const detail = DocumentDetailSchema.parse({
+      ...record,
+      pages: record.parseInfo.pages,
+      rows: record.parseInfo.rows,
+      columns: record.parseInfo.columns,
+      warnings: record.parseInfo.warnings,
+      preview:
+        record.extractedText === null ? null : record.extractedText.slice(0, DEFAULT_LIMITS.previewChars),
+    });
+    res.json(detail);
+  });
+
+  // GET /api/documents/:id/text: full extracted text, for the provenance view. Only after processing.
+  router.get('/:id/text', (req, res) => {
+    const record = findOr404(parseId(req.params.id));
+    if (record.status !== 'processed' || record.extractedText === null) {
+      throw new AppError(409, 'NOT_PROCESSED', 'Text is available once processing has finished successfully.');
+    }
+    // Stored text is already capped at MAX_CHARS_PER_DOCUMENT, so the response size is bounded.
+    res.json(
+      DocumentTextResponseSchema.parse({
+        documentId: record.id,
+        text: record.extractedText,
+        charCount: record.charCount,
+        wasTruncated: record.wasTruncated,
+      }),
+    );
   });
 
   // DELETE /api/documents/:id: removes the row and the in-memory bytes.

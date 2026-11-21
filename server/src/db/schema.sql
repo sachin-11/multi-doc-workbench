@@ -16,6 +16,7 @@ CREATE TABLE IF NOT EXISTS documents (
   extracted_text  TEXT,
   char_count      INTEGER NOT NULL DEFAULT 0 CHECK (char_count >= 0),
   was_truncated   INTEGER NOT NULL DEFAULT 0 CHECK (was_truncated IN (0, 1)),
+  parse_info_json TEXT,
   created_at      TEXT    NOT NULL
 );
 

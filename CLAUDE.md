@@ -119,7 +119,7 @@ Rule for every module: after completing it, (1) tick its checkbox here, (2) upda
 - [x] **M1** Project setup + CLAUDE.md — [doc](docs/modules/M01-project-setup.md)
 - [x] **M2** Shared types/schemas + SQLite schema (documents, analyses, findings) — [doc](docs/modules/M02-shared-schemas-and-db.md)
 - [x] **M3** Upload API + file validation + secure handling — [doc](docs/modules/M03-upload-api.md)
-- [ ] **M4** Document processing pipeline (parser interface, PDF/TXT/CSV, chunking, error states) — [doc](docs/modules/M04-processing-pipeline.md)
+- [x] **M4** Document processing pipeline (parser interface, PDF/TXT/CSV, chunking, error states) — [doc](docs/modules/M04-processing-pipeline.md)
 - [ ] **M5** LLM provider abstraction (real + mock) + structured output with zod — [doc](docs/modules/M05-llm-provider.md)
 - [ ] **M6** Analysis engine (per-doc extraction, then cross-doc comparison with provenance) — [doc](docs/modules/M06-analysis-engine.md)
 - [ ] **M7** Frontend: upload UI, prompt input, results views (table, summary, discrepancies, missing info, key-values), source badges, copy button, error states — [doc](docs/modules/M07-frontend.md)
@@ -172,6 +172,20 @@ Newest entries at the bottom. Each entry: date/time, module, what was done, file
   - No authentication, no rate limiting. Both are out of scope for the assignment.
 - **Next step:** M4 — parser interface, PDF/TXT/CSV parsing, chunking and truncation (`wasTruncated`, `charCount`), status transitions (`uploaded` → `processing` → `processed`/`failed`), and the missing-buffer case above. Wire it into `server/src/processing/index.ts`.
 
+### 2026-11-21 16:00 (local) — M4 Document processing pipeline
+- **Done:** Parser interface and registry (`DocumentParser`, `UnsupportedFormatError`, `DocumentParseError`). Parsers: TXT (strict UTF-8), PDF (pdf-parse v2, page count, scanned or empty PDF gives a clear error), CSV (papaparse, `Columns:` line and `Row n: column=value; ...` text, capped at 500 rows with a warning). Pure text functions: normalise, per-document truncation (`MAX_CHARS_PER_DOCUMENT`, sets `wasTruncated` and a warning), chunking (4000 chars, 200 overlap, offsets recorded). Orchestrator: status `processing` → `processed` / `failed` / `unsupported`, 20 s timeout, safe error messages, raw bytes freed after processing, `getParsedDocument` recomputes chunks from stored text. In-process queue with concurrency 2. `GET /api/documents/:id` returns detail (preview only). `GET /api/documents/:id/text` returns full text, or 409 if not processed. Missing-buffer case (M3 known issue) now becomes `failed` with "upload it again".
+- **Verified:** `npm run typecheck` exit 0. `npm test` 55/55 passing (8 files), including a batch test (one corrupt PDF plus one TXT: the TXT is processed, the PDF fails). Covered: TXT normalisation, CSV labelled text and row count, 500-row cap, chunk offsets and full coverage, truncation flag and warning, valid PDF fixture (generated in code), corrupted PDF → `failed` with readable message while the server keeps answering, image → `unsupported` and 409 for text, timeout, missing buffer, generic message for unexpected errors (no internal details).
+- **Files touched:** `shared/src/{processing,constants,index}.ts`, `server/src/processing/{index,text,finalize,queue}.ts`, `server/src/processing/parsers/{types,decode,txtParser,pdfParser,csvParser,registry}.ts`, tests in `server/src/processing/{text.test,processor.test}.ts` and `server/src/processing/parsers/parsers.test.ts`, `server/src/testing/{fixtures,testApp}.ts`, `server/src/routes/{documents,documents.test}.ts`, `server/src/app.ts`, `server/src/index.ts`, `server/src/config/env.ts`, `server/src/db/schema.sql`, `server/src/db/repositories/documentsRepo.ts`, `server/package.json`, `package-lock.json`, `.env.example`, `docs/modules/M04-processing-pipeline.md`.
+- **Known issues:**
+  - **No OCR.** Scanned PDFs fail with a clear message. Images are `unsupported`. Image OCR (`tesseract.js`) is stretch and was not started.
+  - **Queue is in memory.** Jobs are lost on restart. A document left in `processing` after a crash stays that way. Production would use BullMQ or SQS, and a startup sweep for stuck documents.
+  - **Timeout cannot cancel CPU work.** The parse keeps running in the background, but the document is marked `failed` and its bytes are freed. A worker thread would allow real cancellation.
+  - **Chunk offsets are on the stored text.** Text is normalised and truncated before chunking, so offsets point into the normalised text, not the raw upload. Provenance snippets must use the stored text.
+  - **`charCount` is the stored (truncated) length.** The original length appears only in the truncation warning.
+  - **PDF tables and layout** are flattened to text. Columns and reading order can be lost.
+  - **Schema changed** (`parse_info_json` column). Existing dev DBs need `npm run db:reset`.
+- **Next step:** M5 — LLM provider abstraction (OpenAI-compatible HTTP client and MOCK provider), with zod-validated structured output (`PerDocumentExtractionOutput`, `CrossDocumentAnalysisOutput`) and retry or fallback on invalid output.
+
 ## DECISIONS LOG
 Ownership legend:
 - **[Assignment]**: fixed by the assignment brief
@@ -204,3 +218,9 @@ The AI-disclosure section of the README (M10) is built from this list. Mark each
 | D20 | 2026-11-21 | Raw upload bytes are kept in an in-process `Map` with a TTL (`BUFFER_TTL_MINUTES`, default 60). Production would use object storage | Simplest option that keeps bytes out of SQLite and out of the file system. Known limitation: lost on restart | [AI-suggested] |
 | D21 | 2026-11-21 | `DocumentMeta.format` is nullable. Rejected files whose type is unknown have no format | A rejected `.exe` has no supported format, but it still needs a DB row so the UI can show it | [AI-suggested] |
 | D22 | 2026-11-21 | Config stays in `server/src/config/env.ts`, following the folder structure in this file, not `server/src/config.ts` from the M3 brief | Keeps one config location, as the structure section specifies | [AI-suggested] |
+| D23 | 2026-11-21 | Parser registry: one parser object per format, behind one `DocumentParser` interface, looked up by format in a map. A format with no parser (image) is `unsupported` | Adding a format is one file plus one registry entry. Unsupported formats are explicit, not silent | [AI-suggested] |
+| D24 | 2026-11-21 | CSV becomes labelled text: a `Columns:` line, then `Row n: column=value; ...` per row. Empty cells show `(empty)`. Rows are capped at 500 with a warning, and the true row count is kept | The model sees field names next to values, which provenance and missing-info detection need. The cap keeps the text bounded | [AI-suggested] |
+| D25 | 2026-11-21 | Per-document truncation at `MAX_CHARS_PER_DOCUMENT` (default 60000), with `wasTruncated` and a warning. Chunks of ~4000 chars with 200 overlap, offsets recorded. Chunks are recomputed from stored text, so offsets are deterministic | Large documents are bounded and the cut is visible. Offsets let a later snippet be traced back to a position in the document | [AI-suggested] |
+| D26 | 2026-11-21 | In-process task queue with a concurrency limit (default 2). Production would use BullMQ or SQS | Simplest background processing that does not block the upload request. Known limitation: jobs are lost on restart | [AI-suggested] |
+| D27 | 2026-11-21 | Raw bytes are freed after processing in every outcome (success or failure), not only after success | The file is no longer useful once it has been processed or has failed. Keeping it would only use memory | [AI-suggested] (the brief said after success) |
+| D28 | 2026-11-21 | Parse timeout (`PROCESSING_TIMEOUT_MS`, default 20000) → `failed` with "took too long". Unexpected errors → a generic message, with details only in logs | Stops a hung parse from holding a queue slot forever, and keeps internals out of the UI | [AI-suggested] |

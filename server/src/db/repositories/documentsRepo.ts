@@ -4,12 +4,20 @@ import {
   type DocumentMeta,
   type DocumentStatus,
 } from '@mdw/shared';
+import {
+  DocumentParseInfoSchema,
+  type DocumentParseInfo,
+  type ParsedDocument,
+} from '@mdw/shared';
 import type { Db } from '../client.js';
 
 /** Document metadata plus the stored text. Text is server-only and never sent to clients by default. */
 export interface DocumentRecord extends DocumentMeta {
   extractedText: string | null;
+  parseInfo: DocumentParseInfo;
 }
+
+const EMPTY_PARSE_INFO: DocumentParseInfo = { pages: null, rows: null, columns: null, warnings: [] };
 
 interface DocumentRow {
   id: string;
@@ -23,12 +31,13 @@ interface DocumentRow {
   extracted_text: string | null;
   char_count: number;
   was_truncated: number;
+  parse_info_json: string | null;
   created_at: string;
 }
 
-function rowToRecord(row: DocumentRow): DocumentRecord {
+function rowToMeta(row: DocumentRow): DocumentMeta {
   // Zod validates the mapped object, so an unexpected DB value fails loudly here.
-  const meta = DocumentMetaSchema.parse({
+  return DocumentMetaSchema.parse({
     id: row.id,
     originalName: row.original_name,
     sanitizedName: row.sanitized_name,
@@ -41,7 +50,20 @@ function rowToRecord(row: DocumentRow): DocumentRecord {
     wasTruncated: row.was_truncated === 1,
     createdAt: row.created_at,
   });
-  return { ...meta, extractedText: row.extracted_text };
+}
+
+function parseInfoFromJson(json: string | null): DocumentParseInfo {
+  if (json === null) return EMPTY_PARSE_INFO;
+  const raw: unknown = JSON.parse(json);
+  return DocumentParseInfoSchema.parse(raw);
+}
+
+function rowToRecord(row: DocumentRow): DocumentRecord {
+  return {
+    ...rowToMeta(row),
+    extractedText: row.extracted_text,
+    parseInfo: parseInfoFromJson(row.parse_info_json),
+  };
 }
 
 export function createDocumentsRepo(db: Db) {
@@ -57,6 +79,15 @@ export function createDocumentsRepo(db: Db) {
   const getByIdStmt = db.prepare<[string], DocumentRow>(`SELECT * FROM documents WHERE id = ?`);
   const listStmt = db.prepare<[], DocumentRow>(`SELECT * FROM documents ORDER BY created_at DESC`);
   const deleteStmt = db.prepare(`DELETE FROM documents WHERE id = ?`);
+  const saveParsedStmt = db.prepare(`
+    UPDATE documents SET
+      status = 'processed',
+      error_message = NULL,
+      extracted_text = @text,
+      char_count = @charCount,
+      was_truncated = @wasTruncated,
+      parse_info_json = @parseInfoJson
+    WHERE id = @id`);
   const updateStatusStmt = db.prepare(
     `UPDATE documents SET status = @status, error_message = @errorMessage WHERE id = @id`,
   );
@@ -77,13 +108,32 @@ export function createDocumentsRepo(db: Db) {
       return row ? rowToRecord(row) : null;
     },
 
+    /** Metadata only. Extracted text is never included in list results. */
     list(): DocumentMeta[] {
-      return (listStmt.all() as DocumentRow[]).map((row) => rowToRecord(row));
+      return (listStmt.all() as DocumentRow[]).map((row) => rowToMeta(row));
     },
 
     /** Deletes a document row. Returns false when no row matched. */
     delete(id: string): boolean {
       return deleteStmt.run(id).changes > 0;
+    },
+
+    /** Stores the parser output and marks the document processed, in one statement. */
+    saveParsed(id: string, parsed: ParsedDocument): void {
+      saveParsedStmt.run({
+        id,
+        text: parsed.text,
+        charCount: parsed.charCount,
+        wasTruncated: parsed.wasTruncated ? 1 : 0,
+        parseInfoJson: JSON.stringify(
+          DocumentParseInfoSchema.parse({
+            pages: parsed.pages,
+            rows: parsed.rows,
+            columns: parsed.columns,
+            warnings: parsed.warnings,
+          }),
+        ),
+      });
     },
 
     updateStatus(id: string, status: DocumentStatus, errorMessage: string | null = null): void {

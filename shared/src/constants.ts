@@ -32,4 +32,8 @@ export const DEFAULT_LIMITS = {
   minInstructionChars: 5,
   maxInstructionChars: 2000,
   maxSnippetChars: 200,
+  /** Default MAX_CHARS_PER_DOCUMENT. Text beyond this is truncated and flagged. */
+  maxCharsPerDocument: 60000,
+  /** Preview length in GET /api/documents/:id. */
+  previewChars: 500,
 } as const;

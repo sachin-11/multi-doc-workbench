@@ -29,6 +29,10 @@ const EnvSchema = z.object({
   MAX_FILES: z.coerce.number().int().positive().max(50).default(10),
   // How long raw upload buffers stay in memory before they are evicted.
   BUFFER_TTL_MINUTES: z.coerce.number().int().positive().max(1440).default(60),
+  // Processing (M4). Text beyond MAX_CHARS_PER_DOCUMENT is truncated and flagged.
+  MAX_CHARS_PER_DOCUMENT: z.coerce.number().int().min(1000).max(500000).default(60000),
+  PROCESSING_TIMEOUT_MS: z.coerce.number().int().min(1000).max(300000).default(20000),
+  PROCESSING_CONCURRENCY: z.coerce.number().int().min(1).max(8).default(2),
 });
 
 export type Config = z.infer<typeof EnvSchema>;
