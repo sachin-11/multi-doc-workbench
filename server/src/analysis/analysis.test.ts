@@ -99,10 +99,8 @@ describe('analysis engine (end to end, MOCK provider, in-memory DB)', () => {
     // Name discrepancy is also reported (Verma vs Varma).
     expect(result.findings.some((f) => f.type === 'discrepancy' && f.title.startsWith('Applicant'))).toBe(true);
 
-    // Licence is only in document A, so the missing-information report cites document B.
-    const licence = result.missingInformation.find((f) => f.title.startsWith('Licence number'));
-    expect(licence).toBeDefined();
-    expect(licence?.sources.map((s) => s.documentId)).toContain(docB);
+    // Licence is only in document A, but document B is a financials file, which is not expected to carry one.
+    expect(result.missingInformation.find((f) => f.title.startsWith('Licence number'))).toBeUndefined();
 
     // The comparison table is always built for two or more documents, with every document as a column.
     expect(result.comparisonTable?.columns).toEqual([docA, docB]);

@@ -56,7 +56,7 @@ function renderComparisonTable(result: AnalysisResult, documentsById: ReadonlyMa
   ];
   for (const row of table.rows) {
     const values = table.columns.map((id) => cell(row.values[id] ?? null));
-    lines.push(`| ${cell(row.field)} | ${values.join(' | ')} | ${row.consistent ? 'yes' : 'no'} |`);
+    lines.push(`| ${cell(row.field)} | ${values.join(' | ')} | ${row.consistent === null ? 'single source' : row.consistent ? 'yes' : 'no'} |`);
   }
   return lines;
 }

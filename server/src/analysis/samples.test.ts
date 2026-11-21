@@ -110,7 +110,7 @@ describe('synthetic sample set (samples/)', () => {
 
     // Missing information: co-director and revenue are absent from the KYC summary.
     const missing = result.missingInformation.map((f) => f.title);
-    expect(missing).toContain('Co-director is missing from supporting_letter.txt, financials_fy2025.csv, kyc_summary.txt');
+    expect(missing).toContain('Co-director is missing from kyc_summary.txt');
     expect(missing.some((t) => t.startsWith('Revenue FY2025 is missing') && t.includes('kyc_summary.txt'))).toBe(true);
 
     // Provenance: every finding cites at least one document.

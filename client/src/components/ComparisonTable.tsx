@@ -24,13 +24,13 @@ export function ComparisonTable({ table, documentNames }: ComparisonTableProps) 
         </thead>
         <tbody>
           {table.rows.map((row) => (
-            <tr key={row.field} className={row.consistent ? undefined : 'row-inconsistent'}>
+            <tr key={row.field} className={row.consistent === false ? 'row-inconsistent' : undefined}>
               <th scope="row">{row.field}</th>
               {table.columns.map((id) => {
                 const value = row.values[id] ?? null;
                 return <td key={id}>{value === null || value === '' ? <span aria-label="not stated">—</span> : value}</td>;
               })}
-              <td>{row.consistent ? 'Yes' : 'No'}</td>
+              <td>{row.consistent === null ? 'Single source' : row.consistent ? 'Yes' : 'No'}</td>
             </tr>
           ))}
         </tbody>

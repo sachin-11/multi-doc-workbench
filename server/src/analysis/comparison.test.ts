@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import type { ExtractedFact } from '@mdw/shared';
 import { compareFacts } from './comparison.js';
+import { inferDocTypeFromName } from './docTypes.js';
 
 /*
  * The comparison is deterministic code. These tests pin down what it reports and, as important, what it
@@ -78,7 +79,17 @@ describe('discrepancies', () => {
       [LETTER, [fact(LETTER, 'revenue_fy2025', '4.8 crore', 'financial'), fact(LETTER, 'licence_expiry', '2027-03-31', 'date')]],
     ]);
     expect(result.findings.filter((f) => f.type === 'discrepancy')).toEqual([]);
-    expect(result.comparisonTable.rows.every((row) => row.consistent)).toBe(true);
+    expect(result.comparisonTable.rows.every((row) => row.consistent === true)).toBe(true);
+  });
+
+  it('marks a field that only one document states as single source (consistent: null)', () => {
+    const result = run([
+      [FORM, [fact(FORM, 'loan_amount', 'INR 75,00,000'), fact(FORM, 'applicant_name', 'Rohan Mehta', 'identity')]],
+      [LETTER, [fact(LETTER, 'applicant', 'Rohan Mehta', 'identity')]],
+    ]);
+    const rows = Object.fromEntries(result.comparisonTable.rows.map((r) => [r.field, r.consistent]));
+    expect(rows['Loan']).toBeNull();
+    expect(rows['Applicant / director name']).toBe(true);
   });
 
   it('reports a company suffix variant as a low-severity match, not a discrepancy', () => {
@@ -118,13 +129,54 @@ describe('missing information', () => {
       [KYC, [fact(KYC, 'company', 'Nimbus', 'identity')]],
     ]);
     const titles = result.missingInformation.map(title);
-    expect(titles).toContain('Co-director is missing from supporting_letter.txt, kyc_summary.txt');
+    // A supporting letter is not expected to name a co-director, so only the KYC summary is a gap.
+    expect(titles).toContain('Co-director is missing from kyc_summary.txt');
     expect(titles).toContain('Licence number is missing from kyc_summary.txt');
-    // Every document is cited, the absent ones without a fact.
+    // The document that states it and the expected-but-missing one are cited, the absent one without a fact.
     const coDirector = result.missingInformation.find((f) => f.title.startsWith('Co-director'));
-    expect(coDirector?.sources.map((s) => s.documentId)).toEqual([FORM.documentId, LETTER.documentId, KYC.documentId]);
+    expect(coDirector?.sources.map((s) => s.documentId)).toEqual([FORM.documentId, KYC.documentId]);
     expect(coDirector?.sources[0]?.factId).not.toBeNull();
     expect(coDirector?.sources[1]?.factId).toBeNull();
+  });
+
+  it('only reports a field as missing from document types that are expected to contain it', () => {
+    const result = run([
+      [FORM, [fact(FORM, 'applicant_name', 'Rohan Mehta', 'identity'), fact(FORM, 'company', 'Nimbus', 'identity'), fact(FORM, 'revenue_fy2025', '4,80,00,000', 'financial')]],
+      [CSV, [fact(CSV, 'metric', 'x')]],
+    ]);
+    const titles = result.missingInformation.map(title);
+    // A financials CSV is not expected to carry names, but it is expected to carry revenue.
+    expect(titles.some((t) => t.startsWith('Applicant'))).toBe(false);
+    expect(titles.some((t) => t.startsWith('Company name'))).toBe(false);
+    expect(titles).toContain('Revenue FY2025 is missing from financials.csv');
+  });
+
+  it('assigns severity by field: high for licence, revenue and applicant name, medium for address and co-director', () => {
+    const result = run([
+      [FORM, [
+        fact(FORM, 'licence', 'FSL-1', 'licence'),
+        fact(FORM, 'address', '14 Lotus Park, Sector 21', 'address'),
+        fact(FORM, 'co_director', 'Ananya Kapoor', 'identity'),
+        fact(FORM, 'applicant_name', 'Rohan Mehta', 'identity'),
+      ]],
+      [LETTER, [fact(LETTER, 'address', '14 Lotus Park, Sector 12', 'address'), fact(LETTER, 'applicant', 'Rohan Mehra', 'identity')]],
+      [KYC, [fact(KYC, 'company', 'Nimbus', 'identity')]],
+    ]);
+    const missing = (prefix: string) => result.missingInformation.find((f) => f.title.startsWith(prefix))?.severity;
+    expect(missing('Licence number')).toBe('high');
+    expect(missing('Co-director')).toBe('medium');
+    expect(missing('Applicant')).toBe('high');
+    const difference = (prefix: string) => result.findings.find((f) => f.title.startsWith(prefix))?.severity;
+    expect(difference('Registered address')).toBe('medium');
+    expect(difference('Applicant')).toBe('high');
+  });
+
+  it('infers the document type from the file name', () => {
+    expect(inferDocTypeFromName('application_form.pdf')).toBe('application_form');
+    expect(inferDocTypeFromName('supporting_letter.txt')).toBe('supporting_letter');
+    expect(inferDocTypeFromName('financials_fy2025.csv')).toBe('financials');
+    expect(inferDocTypeFromName('kyc_summary.txt')).toBe('kyc');
+    expect(inferDocTypeFromName('mystery.txt')).toBeNull();
   });
 
   it('counts "No revenue figure is recorded" as missing, never as a value', () => {

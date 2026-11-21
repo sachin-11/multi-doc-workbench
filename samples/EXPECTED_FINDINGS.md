@@ -28,7 +28,7 @@ The comparison table, the discrepancies and the missing-information items are co
 |---|---|---|---|---|---|
 | D1 | Applicant name | `application_form.pdf`: **Rohan Mehta**. `supporting_letter.txt`: **Rohan Mehra**. `kyc_summary.txt` (director): **Rohan Mehta** | high | application form, supporting letter, KYC summary | ✅ yes (the finding lists each document with its own value) |
 | D2 | Registered address | Form: **14 Lotus Park, Sector 21**, Gurugram, Haryana 122016. Letter: **14 Lotus Park, Sector 12**, Gurugram | medium | application form, supporting letter | ✅ yes |
-| D3 | Licence expiry | Form: **31-03-2027**. Letter: **31-03-2026** | medium | application form, supporting letter | ✅ yes |
+| D3 | Licence expiry | Form: **31-03-2027**. Letter: **31-03-2026** | high | application form, supporting letter | ✅ yes |
 | D4 | Revenue FY2025 | Form: **INR 4,80,00,000**. Letter: **INR 3,95,00,000**. Financials CSV: **4,10,00,000** | high | application form, supporting letter, financials CSV | ✅ yes (all three values, all three documents) |
 
 Also check that D3 is a *licence detail* problem, not only a date mismatch. The letter's licence is dated 31-03-2026, which is before the report date (2026-11-21), so it has **probably expired**. See section E.
@@ -45,13 +45,13 @@ Also check that D3 is a *licence detail* problem, not only a date mismatch. The 
 
 | # | Missing item | Where it is stated | Where it is missing | Mock detects? |
 |---|---|---|---|---|
-| M1 | **Co-director** (Ananya Kapoor) | Application form | KYC summary (and the letter and CSV) | ✅ yes |
+| M1 | **Co-director** (Ananya Kapoor) | Application form | KYC summary (a letter or CSV is not expected to name one) | ✅ yes (medium) |
 | M2 | **Revenue FY2025** | Form, letter, CSV | **KYC summary** ("No revenue figure is recorded") | ✅ yes |
-| M3 | **Licence details** | Form, letter | **KYC summary and financials CSV** (neither has a licence field) | ✅ yes |
-| M4 | **Registered address** | Form, letter | **KYC summary and financials CSV** (neither has an address field) | ✅ yes |
+| M3 | **Licence details** | Form, letter | **KYC summary** (a financials CSV is not expected to carry one) | ✅ yes (high) |
+| M4 | **Registered address** | Form, letter | **KYC summary** (a financials CSV is not expected to carry one) | ✅ yes (medium) |
 | M5 | **Loan amount requested** (INR 75,00,000) and **tenure** (5 years) | Form only | Letter, CSV, KYC | ➖ not reported. These are not among the important fields, so they appear in the comparison table only |
 
-Only important fields are checked for gaps: names, address, licence number and expiry, revenue and the co-director. A field is reported when at least one document states it and another does not. A statement such as "No revenue figure is recorded" counts as a gap, not as a value. A prior-year figure that only one document carries (revenue FY2024 in the CSV) is not reported as a gap. On the sample set this gives about seven items: the planted ones above, plus the applicant and company name missing from the CSV.
+Gaps are checked per document type (inferred from the file name: application form, supporting letter, financials, KYC). A document is reported as missing a field only when its type is expected to contain it: a financials CSV is expected to carry revenue only, so it is never reported as missing names, address or licence. Severity: high for licence number and expiry, revenue and applicant name; medium for address, co-director and company name; low for formatting-only differences. Only important fields are checked for gaps: names, address, licence number and expiry, revenue and the co-director. A field is reported when at least one document states it and another does not. A statement such as "No revenue figure is recorded" counts as a gap, not as a value. A prior-year figure that only one document carries (revenue FY2024 in the CSV) is not reported as a gap. On the sample set this gives the planted items above and nothing from the CSV. In the comparison table, a field that only one document states (loan amount, tenure) shows **Single source** instead of Yes.
 
 ## D. Obligations
 

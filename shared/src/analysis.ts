@@ -44,7 +44,8 @@ export const ComparisonRowSchema = z.object({
   field: z.string().min(1).max(200),
   /** Value per document id. null when the document does not state the field. */
   values: z.record(z.uuid(), z.string().nullable()),
-  consistent: z.boolean(),
+  /** null when only one document states the field, so there is nothing to compare. */
+  consistent: z.boolean().nullable(),
 });
 export type ComparisonRow = z.infer<typeof ComparisonRowSchema>;
 

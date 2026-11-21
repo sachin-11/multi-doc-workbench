@@ -202,10 +202,41 @@ describe('end-to-end provenance on samples/ (HTTP, MOCK provider)', () => {
     expect(form?.factId, 'the form that states the co-director is cited with its fact').not.toBeNull();
   });
 
-  it('reports the licence as missing from financials_fy2025.csv', () => {
+  it('reports the licence as missing from kyc_summary.txt only, not from the financials CSV', () => {
     const missing = analysis.missingInformation.find((f) => f.title.startsWith('Licence number'));
     expect(missing, 'licence missing').toBeDefined();
-    expect(missing?.title).toContain('financials_fy2025.csv');
+    expect(missing?.title).toContain('kyc_summary.txt');
+    expect(missing?.title).not.toContain('financials_fy2025.csv');
+    expect(missing?.severity).toBe('high');
+  });
+
+  it('is doc-type aware: the financials CSV is not reported as missing names, address or licence', () => {
+    const csvName = 'financials_fy2025.csv';
+    for (const finding of analysis.missingInformation) {
+      expect(finding.title, `"${finding.title}"`).not.toContain(csvName);
+    }
+    // The co-director gap is medium; revenue missing from the KYC summary is high.
+    expect(analysis.missingInformation.find((f) => f.title.startsWith('Co-director'))?.severity).toBe('medium');
+    expect(analysis.missingInformation.find((f) => f.title.startsWith('Revenue FY2025'))?.severity).toBe('high');
+  });
+
+  it('applies the severity rules to discrepancies: licence, revenue and applicant high, address medium', () => {
+    const severity = (prefix: string) => findByPrefix(analysis.findings, 'discrepancy', prefix)?.severity;
+    expect(severity('Licence expiry date')).toBe('high');
+    expect(severity('Revenue FY2025')).toBe('high');
+    expect(severity('Applicant')).toBe('high');
+    expect(severity('Registered address')).toBe('medium');
+  });
+
+  it('marks fields stated by a single document as single source in the table and the export', () => {
+    const rows = analysis.comparisonTable?.rows ?? [];
+    const single = rows.filter((r) => Object.values(r.values).filter((v) => v !== null).length === 1);
+    expect(single.length, 'the sample set has single-source rows (loan amount, tenure)').toBeGreaterThan(0);
+    for (const row of single) expect(row.consistent, row.field).toBeNull();
+    for (const row of rows.filter((r) => Object.values(r.values).filter((v) => v !== null).length >= 2)) {
+      expect(typeof row.consistent, row.field).toBe('boolean');
+    }
+    expect(markdown).toContain('single source');
   });
 
   it('does not report prior-year figures or unimportant fields as missing information', () => {

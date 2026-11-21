@@ -93,9 +93,8 @@ function ground(draft: FindingDraft, ctx: GroundingContext): Outcome {
     description: isDiscrepancy
       ? `The documents disagree on ${label}. ${described}.`
       : `The documents agree on ${label}. ${described}.`,
-    severity: isDiscrepancy
-      ? (draft.severity ?? differenceSeverity(valued.map((c) => c.fact.category)))
-      : draft.severity,
+    // Severity comes from the field, not from the model, so the rules are the same for every finding.
+    severity: isDiscrepancy ? differenceSeverity(normalizeKey(first.key).base) : draft.severity,
     sources: valued.map((c) => sourceOf(c.documentId, c.fact)),
   };
 

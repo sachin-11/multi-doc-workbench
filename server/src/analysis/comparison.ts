@@ -14,6 +14,7 @@ import {
   normalizeValue,
   type NormalizedKey,
 } from './normalize.js';
+import { inferDocType, isExpected } from './docTypes.js';
 import { describeComparison } from './summary.js';
 
 /*
@@ -121,16 +122,22 @@ export function valuesAgree(sets: readonly ReadonlySet<string>[]): boolean {
   return true;
 }
 
-type Category = ExtractedFact['category'];
+/**
+ * Severity by field, not by fact category.
+ * high: licence number and expiry, revenue, applicant name (a conflict, or missing where it is expected).
+ * medium: address, co-director, company name. Other fields: medium for a conflict, low when missing.
+ * low (set where the finding is built): formatting-only differences.
+ */
+const HIGH_BASES = new Set(['applicant_name', 'licence', 'licence_expiry', 'revenue']);
+const MEDIUM_BASES = new Set(['address', 'co_director', 'company']);
 
-export function differenceSeverity(categories: readonly Category[]): 'medium' | 'high' {
-  return categories.some((c) => c === 'identity' || c === 'financial') ? 'high' : 'medium';
+export function differenceSeverity(base: string): 'medium' | 'high' {
+  return HIGH_BASES.has(base) ? 'high' : 'medium';
 }
 
-function missingSeverity(categories: readonly Category[]): 'low' | 'medium' | 'high' {
-  if (categories.some((c) => c === 'identity' || c === 'financial')) return 'high';
-  if (categories.some((c) => c === 'address' || c === 'licence' || c === 'date')) return 'medium';
-  return 'low';
+function missingSeverity(base: string): 'low' | 'medium' | 'high' {
+  if (HIGH_BASES.has(base)) return 'high';
+  return MEDIUM_BASES.has(base) ? 'medium' : 'low';
 }
 
 const SEVERITY_ORDER: Record<string, number> = { high: 0, medium: 1, low: 2 };
@@ -241,6 +248,9 @@ export function compareFacts(
 ): DeterministicComparison {
   const groups = buildGroups(docs, factsByDocument);
   mergePeriodless(groups);
+  const docTypes = new Map(
+    docs.map((d) => [d.documentId, inferDocType(d.originalName, factsByDocument.get(d.documentId) ?? [])] as const),
+  );
 
   // For a field reported per period, only the most widely stated period is checked for gaps. A prior-year
   // figure that only one document carries is not a gap in the others.
@@ -285,7 +295,8 @@ export function compareFacts(
           return [d.documentId, distinct.length > 0 ? distinct.map((e) => e.fact.value).join('; ') : null];
         }),
       ),
-      consistent: present.length < 2 ? true : agree,
+      // A field that only one document states cannot be consistent or inconsistent.
+      consistent: present.length < 2 ? null : agree,
     });
 
     const described = describeValues(
@@ -293,14 +304,13 @@ export function compareFacts(
     );
     // All facts of every document that has the field, so every document's value is cited.
     const sources = perDoc.flatMap((p) => uniqueFacts(p.all).map((fact) => sourceOf(p.doc.documentId, fact)));
-    const categories = perDoc.flatMap((p) => p.all.map((e) => e.fact.category));
 
     if (present.length >= 2 && !agree) {
       discrepancies.push({
         type: 'discrepancy',
         title: `${label} differs between documents`,
         description: `The documents disagree on ${label}. ${described}.`,
-        severity: differenceSeverity(categories),
+        severity: differenceSeverity(group.key.base),
         sources,
       });
       covered.add(group.key.key);
@@ -329,7 +339,10 @@ export function compareFacts(
       }
     }
 
-    const absent = docs.filter((d) => !present.includes(d));
+    // Only documents whose type is expected to contain the field count as gaps.
+    const absent = docs.filter(
+      (d) => !present.includes(d) && isExpected(docTypes.get(d.documentId) ?? null, group.key.base),
+    );
     const reportsGaps =
       group.key.period === null || present.length >= (widestPeriod.get(group.key.base) ?? 0);
     if (isImportantBase(group.key.base) && absent.length > 0 && reportsGaps) {
@@ -344,9 +357,10 @@ export function compareFacts(
           `${label} is stated in ${joinNames(present.map((d) => d.originalName))} but not in ${joinNames(absent.map((d) => d.originalName))}.`,
           ...absenceNotes,
         ].join(' '),
-        severity: missingSeverity(categories),
-        // Every document is cited: present ones with their fact, absent ones with the statement of absence if any.
-        sources: docs.map((d) => {
+        severity: missingSeverity(group.key.base),
+        // Cited: documents that state the field (with their fact) and the expected-but-missing ones
+        // (with their statement of absence, if any).
+        sources: [...present, ...absent].map((d) => {
           const cell = group.cells.get(d.documentId);
           const value = cell?.values[0];
           if (value) return sourceOf(d.documentId, value.fact);
