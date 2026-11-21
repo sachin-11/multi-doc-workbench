@@ -86,6 +86,8 @@ export const errorHandler: ErrorRequestHandler = (err: unknown, _req, res, _next
   } else if (err instanceof multer.MulterError) {
     mapped = mapMulterError(err);
   } else if (err instanceof ZodError) {
+    // Issue paths and messages only, never values, so a validation failure can be diagnosed from the log.
+    logger.warn('validation error', { issues: err.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join(' | ') });
     mapped = mapZodError(err);
   } else {
     mapped = mapBodyParserError(err);
