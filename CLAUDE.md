@@ -118,7 +118,7 @@ Rule for every module: after completing it, (1) tick its checkbox here, (2) upda
 
 - [x] **M1** Project setup + CLAUDE.md — [doc](docs/modules/M01-project-setup.md)
 - [x] **M2** Shared types/schemas + SQLite schema (documents, analyses, findings) — [doc](docs/modules/M02-shared-schemas-and-db.md)
-- [ ] **M3** Upload API + file validation + secure handling — [doc](docs/modules/M03-upload-api.md)
+- [x] **M3** Upload API + file validation + secure handling — [doc](docs/modules/M03-upload-api.md)
 - [ ] **M4** Document processing pipeline (parser interface, PDF/TXT/CSV, chunking, error states) — [doc](docs/modules/M04-processing-pipeline.md)
 - [ ] **M5** LLM provider abstraction (real + mock) + structured output with zod — [doc](docs/modules/M05-llm-provider.md)
 - [ ] **M6** Analysis engine (per-doc extraction, then cross-doc comparison with provenance) — [doc](docs/modules/M06-analysis-engine.md)
@@ -157,6 +157,21 @@ Newest entries at the bottom. Each entry: date/time, module, what was done, file
   - Schema changes need `db:reset` until a migration tool is added.
 - **Next step:** M3 — upload API (`POST /api/documents`), file validation (type, size, count from config), filename sanitisation, memory/tmp handling. Use `openDatabase(config.DB_PATH)` and `createDocumentsRepo` from `server/src/db/`.
 
+### 2026-11-21 15:30 (local) — M3 Upload API + validation + secure handling
+- **Done:** `POST /api/documents` (multipart, field `files`, multer memory storage only). Each file goes through a pure validation pipeline: extension allowlist, declared MIME matches extension, empty file, magic bytes (PDF `%PDF-`, PNG and JPEG signatures), TXT/CSV valid UTF-8 with no NUL bytes, filename sanitisation (path segments, control chars, unsafe symbols, length cap, no leading dots). Partial success: valid files are stored and queued, invalid ones are stored with status `unsupported` or `failed` and returned in `rejected` with a code and reason. `GET /api/documents` (metadata only), `GET /api/documents/:id` (UUID validated), `DELETE /api/documents/:id` (DB row and buffer). In-memory buffer store with TTL. `enqueueProcessing(id)` placeholder hook for M4. Central error handler maps multer, zod and body-parser errors to the ApiError envelope. `helmet` added. Upload limits come from config (`MAX_FILES`, `MAX_FILE_SIZE_MB` default 10, `BUFFER_TTL_MINUTES`).
+- **Verified:** `npm run typecheck` exit 0; `npm test` 28/28 passing (5 files). Covered: valid PDF, fake PDF, empty file, `.exe`, path traversal (`../../etc/passwd.txt` becomes `passwd.txt`), mixed valid and invalid upload returns 200 with 1 accepted and 1 rejected, 413 on too many files, 415 on non-multipart, 400 on no files, id validation, 404, delete, buffer TTL.
+- **Not verified:** a manual curl smoke test against a running server. The attempt was blocked by the permission classifier. Supertest runs the same Express app over HTTP, so coverage is equivalent for routes, but a live check is still worth doing.
+- **Files touched:** `shared/src/{upload,documents,constants,index}.ts`, `server/src/{app,index}.ts`, `server/src/config/env.ts`, `server/src/middleware/errorHandler.ts`, `server/src/routes/documents.ts`, `server/src/upload/validation.ts` (+ test), `server/src/storage/bufferStore.ts` (+ test), `server/src/processing/index.ts`, `server/src/lib/logger.ts`, `server/src/testing/testApp.ts`, `server/src/app.test.ts`, `server/src/db/schema.sql`, `server/src/db/repositories/documentsRepo.ts`, `server/src/routes/documents.test.ts`, `server/package.json`, `package-lock.json`, `.env.example`, `docs/modules/M03-upload-api.md`.
+- **Known issues:**
+  - **Buffers are in memory only.** After a restart, a `uploaded` document row has no bytes. M4 must mark such documents `failed` when the buffer is missing.
+  - Size and count limits are enforced by multer. An oversize file or too many files returns 413 for the whole request, not per file. This is the intended multer behaviour and it matches the 413 requirement.
+  - `documents.format` is now nullable, so the schema changed from M2. Existing dev DBs need `npm run db:reset`.
+  - Config lives in `server/src/config/env.ts` (as CLAUDE.md folder structure says), not `server/src/config.ts` as in the M3 brief.
+  - The filename sanitiser keeps ASCII only. Non-ASCII letters become `_`. `originalName` keeps the cleaned display name.
+  - `application/vnd.ms-excel` is accepted for `.csv` only (Windows browsers send it for CSV). Sent with `.txt` or `.pdf`, it fails the MIME check.
+  - No authentication, no rate limiting. Both are out of scope for the assignment.
+- **Next step:** M4 — parser interface, PDF/TXT/CSV parsing, chunking and truncation (`wasTruncated`, `charCount`), status transitions (`uploaded` → `processing` → `processed`/`failed`), and the missing-buffer case above. Wire it into `server/src/processing/index.ts`.
+
 ## DECISIONS LOG
 Ownership legend:
 - **[Assignment]**: fixed by the assignment brief
@@ -183,3 +198,9 @@ The AI-disclosure section of the README (M10) is built from this list. Mark each
 | D14 | 2026-11-21 | Repositories are factory functions that take the `Db` handle; tests use `:memory:` | No global singleton, isolated tests | [AI-suggested] |
 | D15 | 2026-11-21 | Max documents per analysis comes from config (`MAX_FILES`) through `createAnalysisRequestSchema(max)`. `DEFAULT_LIMITS` are only fallbacks and schema bounds | Limits stay configurable without hard-coding them in `shared` | [AI-suggested] |
 | D16 | 2026-11-21 | `DB_PATH` resolves relative to the repo root; `:memory:` is allowed | Same path regardless of which workspace runs the command | [AI-suggested] |
+| D17 | 2026-11-21 | Multer memory storage only. User file names are never used in filesystem paths. Nothing is written to disk | Removes path traversal and disk-leftover risk. The file name is display data only | [AI-suggested] |
+| D18 | 2026-11-21 | Content checks by magic bytes (PDF `%PDF-`, PNG and JPEG signatures) and UTF-8 with no NUL bytes for TXT and CSV, in addition to extension and declared MIME | A renamed or fake file is rejected even when its extension and MIME type look right | [AI-suggested] |
+| D19 | 2026-11-21 | Partial-success upload: each file is validated on its own. Valid files are stored and queued. Invalid files are stored with status `unsupported` or `failed` and returned with a code and reason. The request returns 200. Multer count and size limits still return 413 for the whole request | One bad file does not block a batch. The UI can show every file and why it failed | [Assignment] (partial success implied by the upload requirements) and [AI-suggested] (the exact behaviour) |
+| D20 | 2026-11-21 | Raw upload bytes are kept in an in-process `Map` with a TTL (`BUFFER_TTL_MINUTES`, default 60). Production would use object storage | Simplest option that keeps bytes out of SQLite and out of the file system. Known limitation: lost on restart | [AI-suggested] |
+| D21 | 2026-11-21 | `DocumentMeta.format` is nullable. Rejected files whose type is unknown have no format | A rejected `.exe` has no supported format, but it still needs a DB row so the UI can show it | [AI-suggested] |
+| D22 | 2026-11-21 | Config stays in `server/src/config/env.ts`, following the folder structure in this file, not `server/src/config.ts` from the M3 brief | Keeps one config location, as the structure section specifies | [AI-suggested] |

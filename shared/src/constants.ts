@@ -8,6 +8,8 @@ export const MIME_TO_FORMAT: Readonly<Record<string, DocumentFormat>> = {
   'text/plain': 'txt',
   'text/csv': 'csv',
   'application/csv': 'csv',
+  // Windows browsers often send CSV files with this type.
+  'application/vnd.ms-excel': 'csv',
   'image/png': 'image',
   'image/jpeg': 'image',
 };

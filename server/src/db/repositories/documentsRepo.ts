@@ -16,7 +16,7 @@ interface DocumentRow {
   original_name: string;
   sanitized_name: string;
   mime_type: string;
-  format: string;
+  format: string | null;
   size_bytes: number;
   status: string;
   error_message: string | null;
@@ -33,7 +33,7 @@ function rowToRecord(row: DocumentRow): DocumentRecord {
     originalName: row.original_name,
     sanitizedName: row.sanitized_name,
     mimeType: row.mime_type,
-    format: row.format as DocumentFormat,
+    format: row.format as DocumentFormat | null,
     sizeBytes: row.size_bytes,
     status: row.status as DocumentStatus,
     errorMessage: row.error_message,
@@ -56,6 +56,7 @@ export function createDocumentsRepo(db: Db) {
 
   const getByIdStmt = db.prepare<[string], DocumentRow>(`SELECT * FROM documents WHERE id = ?`);
   const listStmt = db.prepare<[], DocumentRow>(`SELECT * FROM documents ORDER BY created_at DESC`);
+  const deleteStmt = db.prepare(`DELETE FROM documents WHERE id = ?`);
   const updateStatusStmt = db.prepare(
     `UPDATE documents SET status = @status, error_message = @errorMessage WHERE id = @id`,
   );
@@ -78,6 +79,11 @@ export function createDocumentsRepo(db: Db) {
 
     list(): DocumentMeta[] {
       return (listStmt.all() as DocumentRow[]).map((row) => rowToRecord(row));
+    },
+
+    /** Deletes a document row. Returns false when no row matched. */
+    delete(id: string): boolean {
+      return deleteStmt.run(id).changes > 0;
     },
 
     updateStatus(id: string, status: DocumentStatus, errorMessage: string | null = null): void {

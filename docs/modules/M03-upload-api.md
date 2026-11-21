@@ -1,23 +1,30 @@
 # M3 — Upload API + file validation + secure handling
 
-**Status:** Not started
+**Status:** Done (2026-11-21). Manual curl smoke test not run. Route coverage is from supertest.
 
 ## Goal
-Accept multiple files safely, store them outside the code tree, and reject invalid input with clear errors.
+Accept multiple files safely, keep them out of the file system, and report each file's result without failing the whole batch.
 
-## Scope
-- `POST /api/documents` (multipart, multiple files).
-- Validation: MIME type and extension allow-list (PDF, TXT, CSV; image optional), size limit (`MAX_FILE_SIZE_MB`), count limit (`MAX_FILES`).
-- Filename sanitisation (strip paths, control chars, limit length). Never use the client filename as a storage path.
-- Storage in `uploads/` or memory, with generated IDs. No execution of content.
-- `GET /api/documents` and `DELETE /api/documents/:id`.
+## What was built
+- `POST /api/documents`: multipart, field `files`, memory storage only (multer). Returns `{ accepted: DocumentMeta[], rejected: { originalName, code, reason }[] }` (shared `UploadResponseSchema`).
+- Validation (`server/src/upload/validation.ts`, pure functions): extension allowlist, declared MIME matches the extension, empty file, magic bytes (PDF `%PDF-`, PNG and JPEG signatures), TXT and CSV valid UTF-8 with no NUL bytes. Filename sanitisation: strips path segments, control characters and unsafe symbols, caps length, no leading dots.
+- Storage: DB row for every file (accepted with status `uploaded`; rejected with `unsupported` or `failed`). Raw bytes for accepted files only, in an in-memory store with TTL (`server/src/storage/bufferStore.ts`).
+- `GET /api/documents` (metadata only), `GET /api/documents/:id` (UUID validated), `DELETE /api/documents/:id` (returns 204).
+- `enqueueProcessing(id)` placeholder in `server/src/processing/index.ts` for M4.
+- Errors: multer, zod and body-parser errors map to the shared ApiError envelope. No stack traces in responses. `helmet` added.
 
 ## Deliverables
-- [ ] Upload route with multipart parsing (memory or temp dir)
-- [ ] Validation module with unit tests (type, size, count, sanitisation)
-- [ ] Path traversal test (e.g. `../../etc/passwd` name)
-- [ ] Per-file result: accepted or rejected with reason
+- [x] Upload route with multipart parsing (memory storage)
+- [x] Validation module with unit tests (type, size, count, sanitisation)
+- [x] Path traversal test (`../../etc/passwd.txt` becomes `passwd.txt`)
+- [x] Per-file result: accepted or rejected with reason
 
 ## Acceptance
-- Oversized, wrong-type, too-many, and traversal-named files are rejected with the standard error envelope.
-- Valid files are stored and listed.
+- [x] Wrong-type, traversal-named, fake-PDF, empty and too-many-file cases are rejected with the standard error envelope. Too-many returns 413.
+- [x] Valid files are stored and listed.
+- [ ] Oversized files are covered by multer config only. No test yet that sends an oversize body.
+
+## Notes
+- Oversized files and too many files reject the whole request with 413 (multer limits). All other checks are per file.
+- Raw bytes are lost on restart. A document row can exist without bytes. M4 must handle that case.
+- See CLAUDE.md, M3 PROGRESS LOG entry, for the known-issues list.

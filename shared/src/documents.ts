@@ -19,7 +19,8 @@ export const DocumentMetaSchema = z.object({
   originalName: z.string().min(1).max(255),
   sanitizedName: z.string().min(1).max(255),
   mimeType: z.string().min(1),
-  format: DocumentFormatSchema,
+  /** null for rejected uploads whose type could not be mapped to a supported format. */
+  format: DocumentFormatSchema.nullable(),
   sizeBytes: z.number().int().nonnegative(),
   status: DocumentStatusSchema,
   errorMessage: z.string().nullable(),

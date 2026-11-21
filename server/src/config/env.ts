@@ -25,8 +25,10 @@ const EnvSchema = z.object({
     .transform((v) => (v && v.trim().length > 0 ? v.trim() : undefined)),
   LLM_BASE_URL: z.string().url().default('https://api.openai.com/v1'),
   LLM_MODEL: z.string().min(1).default('gpt-4o-mini'),
-  MAX_FILE_SIZE_MB: z.coerce.number().positive().default(5),
-  MAX_FILES: z.coerce.number().int().positive().default(10),
+  MAX_FILE_SIZE_MB: z.coerce.number().positive().max(100).default(10),
+  MAX_FILES: z.coerce.number().int().positive().max(50).default(10),
+  // How long raw upload buffers stay in memory before they are evicted.
+  BUFFER_TTL_MINUTES: z.coerce.number().int().positive().max(1440).default(60),
 });
 
 export type Config = z.infer<typeof EnvSchema>;

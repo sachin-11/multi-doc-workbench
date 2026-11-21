@@ -9,7 +9,7 @@ CREATE TABLE IF NOT EXISTS documents (
   original_name   TEXT    NOT NULL,
   sanitized_name  TEXT    NOT NULL,
   mime_type       TEXT    NOT NULL,
-  format          TEXT    NOT NULL CHECK (format IN ('pdf', 'txt', 'csv', 'image')),
+  format          TEXT    CHECK (format IS NULL OR format IN ('pdf', 'txt', 'csv', 'image')),
   size_bytes      INTEGER NOT NULL CHECK (size_bytes >= 0),
   status          TEXT    NOT NULL CHECK (status IN ('uploaded', 'processing', 'processed', 'failed', 'unsupported')),
   error_message   TEXT,

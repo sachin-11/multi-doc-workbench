@@ -1,9 +1,9 @@
 import { describe, it, expect } from 'vitest';
 import request from 'supertest';
 import { HealthResponseSchema } from '@mdw/shared';
-import { createApp } from './app.js';
+import { createTestApp } from './testing/testApp.js';
 
-const app = createApp({ CLIENT_ORIGIN: 'http://localhost:5173' });
+const { app } = createTestApp();
 
 describe('GET /api/health', () => {
   it('returns a body that matches the shared HealthResponse contract', async () => {
@@ -20,6 +20,13 @@ describe('GET /api/health', () => {
       .set('Origin', 'http://localhost:5173');
 
     expect(res.headers['access-control-allow-origin']).toBe('http://localhost:5173');
+  });
+
+  it('sets security headers from helmet', async () => {
+    const res = await request(app).get('/api/health');
+
+    expect(res.headers['x-content-type-options']).toBe('nosniff');
+    expect(res.headers['x-powered-by']).toBeUndefined();
   });
 });
 
