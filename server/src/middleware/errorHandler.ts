@@ -105,7 +105,6 @@ export const errorHandler: ErrorRequestHandler = (err: unknown, _req, res, _next
 
   // Log server-side only (no request body, no file content). Respond generically.
   logger.error('unhandled error', { name: err instanceof Error ? err.name : 'unknown' });
-  console.error(err);
   const body: ApiErrorBody = {
     error: { code: 'INTERNAL_ERROR', message: 'An unexpected error occurred.' },
   };

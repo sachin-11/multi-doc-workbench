@@ -7,6 +7,7 @@ import { createDocumentProcessor } from './processing/index.js';
 import { createBufferStore } from './storage/bufferStore.js';
 import { createAnalysisService } from './analysis/analysisService.js';
 import { getLLMProvider } from './llm/index.js';
+import { logger } from './lib/logger.js';
 
 const config = loadConfig();
 const db = openDatabase(config.DB_PATH);
@@ -33,9 +34,9 @@ const analysisService = createAnalysisService({
 const app = createApp({ config, documents, buffers, processor, analyses, analysisService });
 
 app.listen(config.PORT, () => {
-  console.log(`[server] listening on http://localhost:${config.PORT}`);
-  console.log(`[server] database: ${config.DB_PATH}`);
-  console.log(`[server] CORS origin: ${config.CLIENT_ORIGIN}`);
-  console.log(`[server] upload limits: ${config.MAX_FILES} files, ${config.MAX_FILE_SIZE_MB} MB each`);
-  console.log(`[server] LLM provider: ${provider.name}`);
+  logger.info('server listening', { port: config.PORT, url: `http://localhost:${config.PORT}` });
+  logger.info('database ready', { path: config.DB_PATH });
+  logger.info('CORS allowed origin', { origin: config.CLIENT_ORIGIN });
+  logger.info('upload limits', { maxFiles: config.MAX_FILES, maxFileSizeMb: config.MAX_FILE_SIZE_MB });
+  logger.info('LLM provider selected', { provider: provider.name });
 });
