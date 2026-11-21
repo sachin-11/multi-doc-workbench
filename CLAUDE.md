@@ -160,6 +160,6 @@ The AI-disclosure section of the README (M10) is built from this list. Mark each
 | D5 | 2026-11-21 | Env validated with zod; `LLM_API_KEY` empty means MOCK provider | Explicit config, app runs without a key | [AI-suggested] (provider behaviour is required by [Assignment]) |
 | D6 | 2026-11-21 | Extra env var `CLIENT_ORIGIN` for CORS | Avoids hard-coding the Vite origin | [AI-suggested] |
 | D7 | 2026-11-21 | Central `AppError` + `{ error: { code, message } }` envelope | One error shape for client and tests | [AI-suggested] |
-| D8 | 2026-11-21 | Project lives in subfolder `multi-doc-workbench/` of the existing folder, which is not a git repo | Keeps the unrelated files out of the submission repo | [Developer] (to confirm) |
+| D8 | 2026-11-21 | Project lives at `sachinProjects/multi-doc-workbench/`, a standalone git repo next to other projects (moved from a nested location) | Keeps unrelated files out of the submission repo | [Developer] (confirmed) |
 | D9 | 2026-11-21 | Facts vs interpretation kept separate; every finding has `sources: documentId[]` | Required by [Assignment] (provenance and separation) | [Assignment] |
 | D10 | 2026-11-21 | Per-document extraction first, then cross-document analysis; never one merged prompt | Required by [Assignment] | [Assignment] |
