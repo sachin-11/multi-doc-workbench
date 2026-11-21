@@ -10,6 +10,7 @@ import type { AnalysisService } from './analysis/analysisService.js';
 import { healthRouter } from './routes/health.js';
 import { createDocumentsRouter } from './routes/documents.js';
 import { createAnalysesRouter } from './routes/analyses.js';
+import { createLimitsRouter } from './routes/limits.js';
 import { errorHandler, notFoundHandler } from './middleware/errorHandler.js';
 
 export interface AppDependencies {
@@ -31,6 +32,7 @@ export function createApp(deps: AppDependencies): express.Express {
   app.use(express.json({ limit: '1mb' }));
 
   app.use('/api/health', healthRouter);
+  app.use('/api/limits', createLimitsRouter(deps.config));
   app.use(
     '/api/documents',
     createDocumentsRouter({
