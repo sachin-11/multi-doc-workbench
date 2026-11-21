@@ -124,7 +124,7 @@ Rule for every module: after completing it, (1) tick its checkbox here, (2) upda
 - [x] **M6** Analysis engine (per-doc extraction, then cross-doc comparison with provenance) — [doc](docs/modules/M06-analysis-engine.md)
 - [x] **M7** Frontend: upload UI, prompt input, results views (table, summary, discrepancies, missing info, key-values), source badges, copy button, error states — [doc](docs/modules/M07-frontend.md)
 - [x] **M8** Synthetic sample documents (application form PDF, supporting TXT, financials CSV with deliberate mismatches) — [doc](docs/modules/M08-sample-documents.md)
-- [ ] **M9** Tests (pipeline + analysis provenance) — [doc](docs/modules/M09-tests.md)
+- [x] **M9** Tests (pipeline + analysis provenance) — [doc](docs/modules/M09-tests.md)
 - [ ] **M10** README, AI disclosure, final cleanup — [doc](docs/modules/M10-readme-and-disclosure.md)
 
 ## Time Budget
@@ -241,6 +241,19 @@ Newest entries at the bottom. Each entry: date/time, module, what was done, file
   - Canonical keys use a fixed filler list and alias table. This is not semantic matching, so unlisted label variants will still not match.
 - **Next step:** M9 — tests (pipeline + analysis provenance). `samples.test.ts` already covers the sample-set provenance path end to end. M9 should fill the gaps listed in `docs/modules/M09-tests.md`.
 
+### 2026-11-21 16:10 (local) — M9 Test hardening: flagship e2e, gap coverage, scripts
+- **Done:** Audited the existing suite (all green and fast before this module, no flaky tests seen). Added the flagship `server/test/analysis.samples.e2e.test.ts`: real multipart upload of the four `samples/` files, poll until processed, `POST /api/analyses`, markdown export. It asserts document boundaries, fact snippets found in their own document's text, the revenue and name discrepancies, missing information, no unknown document ids, and the `Source:` export. A mixed upload with the invalid samples is also tested over HTTP. Gap tests: `server/src/llm/prompts.test.ts` (cross-document prompt groups facts per `documentId` and carries no raw text; injected instruction stays inside `<document>`, and the system prompt has the untrusted-data rule), `server/src/config/env.test.ts` (invalid `MAX_FILE_SIZE_MB` and other values fail fast, naming the variable), and `shared/test/provenance.test.ts` (zod rejects a finding with no sources and a fact with no `documentId`). Offline guarantees: `server/test/setup.ts` forces `LLM_API_KEY=""` and blocks `fetch`. Scripts: root `test`, `test:shared`, `test:server`, `test:client`, `check`. Typecheck now covers `test/` folders (`tsconfig.test.json`).
+- **Verified:** `npm run check` exit 0. Typecheck passes in shared, server and client. Tests: shared 1 file / 8 tests, server 16 files / 137 tests, client 2 files / 2 tests. Total 19 files, 147 tests, all passing. Server suite run three times in a row: 137/137 each time. Total runtime about 11 s.
+- **Files touched:** `server/test/{setup.ts,helpers.ts,analysis.samples.e2e.test.ts}`, `server/src/llm/prompts.test.ts`, `server/src/config/env.test.ts`, `shared/test/provenance.test.ts`, `server/vitest.config.ts`, `server/tsconfig.test.json`, `shared/tsconfig.test.json`, `shared/package.json`, `server/package.json`, `package.json`, `package-lock.json`, `docs/modules/M09-tests.md`, `CLAUDE.md`.
+- **Known issues:**
+  - **No lint.** ESLint is not configured, so `check` is typecheck plus tests. Adding it was out of scope.
+  - **Client tests are jsdom only.** Layout and phone width are still unverified in a real browser (carried over from M7).
+  - **Live LLM path still untested** (carried over from M5). The OpenAI client is only tested through a fake transport.
+  - **Assertions not mutation-checked.** I did not confirm that each guard's test fails when that guard is removed.
+  - **Intermittent `0xC0000409` worker crash** from M6 did not reproduce in four full runs. It is not explicitly guarded.
+  - Pre-existing: this file has a duplicated `## DECISIONS LOG` heading. Left as is to keep this commit focused.
+- **Next step:** M10 — README (architecture, assumptions, completed functionality, known limitations, security, productionisation), AI tools disclosure built from the DECISIONS LOG, and final cleanup. Run `npm run check` once more after the README changes.
+
 ## DECISIONS LOG
 
 ## DECISIONS LOG
@@ -309,3 +322,5 @@ The AI-disclosure section of the README (M10) is built from this list. Mark each
 | D54 | 2026-11-21 | Company suffix variants compare equal (`Pvt` and `Private`, `Ltd` and `Limited`). A formatting variant is reported as consistent, not as a discrepancy | The brief asks for name variants to be consistent or low severity. Expanding the common suffixes covers this set. A real LLM would judge wider variants | [AI-suggested] |
 | D55 | 2026-11-21 | `samples/EXPECTED_FINDINGS.md` is the acceptance target. `server/src/analysis/samples.test.ts` asserts the planted discrepancies, the consistent company name, the missing co-director and KYC revenue, and the rejected invalid files. Items that need real judgement (licence probably expired, "provisional" revenue, EMI impact) are documented as needing an LLM and are not asserted | Keeps the test honest about what the MOCK can do, and still fails if a planted item regresses | [Developer] (specified for M8) |
 | D56 | 2026-11-21 | The scripts live in a root `scripts/` folder, which is a standalone ESM package (`scripts/package.json`), not an npm workspace. It is typechecked with `tsc -p scripts/tsconfig.json` | Keeps the workspaces as the folder structure lists them (`shared`, `server`, `client`). The seed script imports server services directly | [AI-suggested] |
+| D57 | 2026-11-21 | Offline, deterministic tests: `LLM_API_KEY` is forced empty in `server/test/setup.ts`, `fetch` is replaced with a function that throws, and every HTTP test uses an in-memory DB and the MOCK provider. No test calls a real provider | A test suite that needs a key or a network is not reviewable or repeatable. Blocking `fetch` makes any accidental provider call fail loudly | [AI-suggested] |
+| D58 | 2026-11-21 | The flagship test is `server/test/analysis.samples.e2e.test.ts`. It goes through HTTP on the real `samples/` files (upload, poll, analyse, export) and checks provenance and document boundaries end to end. Unit tests cover each guard alone; this test shows they hold together | The brief's core requirements are provenance and document boundaries, and only an end-to-end run shows that the parts fit. Chosen as the single test a reviewer should read first | [Developer] (test scope and flagship choice) |
