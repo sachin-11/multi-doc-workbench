@@ -28,6 +28,7 @@ CREATE TABLE IF NOT EXISTS analyses (
   provider              TEXT NOT NULL CHECK (provider IN ('openai', 'mock')),
   summary               TEXT,
   comparison_table_json TEXT,
+  warnings_json         TEXT NOT NULL DEFAULT '[]',
   error_message         TEXT,
   created_at            TEXT NOT NULL,
   completed_at          TEXT

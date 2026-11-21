@@ -151,3 +151,56 @@ export function verifyFacts<F extends Pick<ExtractedFact, 'key' | 'sourceSnippet
   });
   return { cleaned, warnings };
 }
+
+/**
+ * A factId is only valid under the document that owns it. A fact from document B cited under
+ * document A keeps the document citation and loses the factId, with a warning.
+ * `factOwner` maps factId -> documentId for every fact in the analysis.
+ */
+export function enforceFactOwnership(
+  output: CrossDocumentAnalysisOutput,
+  factOwner: ReadonlyMap<string, string>,
+): GuardResult<CrossDocumentAnalysisOutput> {
+  const warnings: string[] = [];
+  const fixDraft = (finding: Draft, label: string): Draft => ({
+    ...finding,
+    sources: finding.sources.map((source) => {
+      if (source.factId === null) return source;
+      const owner = factOwner.get(source.factId);
+      if (owner === source.documentId) return source;
+      warnings.push(`${label}: removed a factId that belongs to a different document`);
+      return { ...source, factId: null };
+    }),
+  });
+  return {
+    cleaned: {
+      ...output,
+      findings: output.findings.map((f, i) => fixDraft(f, `findings[${i}]`)),
+      missingInformation: output.missingInformation.map((f, i) => fixDraft(f, `missingInformation[${i}]`)),
+    },
+    warnings,
+  };
+}
+
+/**
+ * Fills a missing source snippet from the fact it points to, so the UI can show the quoted text
+ * next to every citation. Snippets the model already wrote are left alone.
+ */
+export function attachSnippetsFromFacts(
+  output: CrossDocumentAnalysisOutput,
+  factById: ReadonlyMap<string, Pick<ExtractedFact, 'sourceSnippet'>>,
+): CrossDocumentAnalysisOutput {
+  const fill = (finding: Draft): Draft => ({
+    ...finding,
+    sources: finding.sources.map((source) => {
+      if (source.snippet !== null || source.factId === null) return source;
+      const fact = factById.get(source.factId);
+      return fact ? { ...source, snippet: fact.sourceSnippet } : source;
+    }),
+  });
+  return {
+    ...output,
+    findings: output.findings.map(fill),
+    missingInformation: output.missingInformation.map(fill),
+  };
+}

@@ -1,11 +1,14 @@
+import { z } from 'zod';
 import {
   AnalysisResultSchema,
+  AnalysisSummarySchema,
   ComparisonTableSchema,
   ExtractedFactSchema,
   FindingSchema,
   type AnalysisProvider,
   type AnalysisResult,
   type AnalysisStatus,
+  type AnalysisSummary,
   type ComparisonTable,
   type ExtractedFact,
   type Finding,
@@ -23,6 +26,26 @@ export interface CreateAnalysisInput {
   createdAt: string;
 }
 
+/** Everything a finished run writes. Written in one transaction by `persistRun`. */
+export type RunOutcome =
+  | {
+      status: 'completed';
+      facts: ExtractedFact[];
+      findings: Finding[];
+      summary: string | null;
+      comparisonTable: ComparisonTable | null;
+      warnings: string[];
+      completedAt: string;
+    }
+  | {
+      status: 'failed';
+      /** Facts extracted before the failure are kept. */
+      facts: ExtractedFact[];
+      warnings: string[];
+      errorMessage: string;
+      completedAt: string;
+    };
+
 /** Fields written when an analysis changes status. Omitted fields keep their stored value. */
 export interface StatusUpdate {
   summary?: string | null;
@@ -38,6 +61,7 @@ interface AnalysisRow {
   provider: string;
   summary: string | null;
   comparison_table_json: string | null;
+  warnings_json: string;
   error_message: string | null;
   created_at: string;
   completed_at: string | null;
@@ -123,6 +147,22 @@ export function createAnalysesRepo(db: Db) {
     WHERE f.analysis_id = ?
     ORDER BY fs.id`);
 
+  const finalizeStmt = db.prepare(`
+    UPDATE analyses SET
+      status                = @status,
+      summary               = @summary,
+      comparison_table_json = @comparisonTableJson,
+      warnings_json         = @warningsJson,
+      error_message         = @errorMessage,
+      completed_at          = @completedAt
+    WHERE id = @id`);
+  const listAnalysesStmt = db.prepare<[number], AnalysisRow>(
+    `SELECT * FROM analyses ORDER BY created_at DESC, rowid DESC LIMIT ?`,
+  );
+  const listDocumentIdsStmt = db.prepare<[string], { document_id: string }>(
+    `SELECT document_id FROM analysis_documents WHERE analysis_id = ? ORDER BY rowid`,
+  );
+
   const createTx = db.transaction((input: CreateAnalysisInput) => {
     insertAnalysisStmt.run({
       id: input.id,
@@ -176,7 +216,49 @@ export function createAnalysesRepo(db: Db) {
     }
   });
 
+  // Nested calls to saveFactsTx / saveFindingsTx become savepoints, so the whole run is one transaction.
+  const persistRunTx = db.transaction((analysisId: string, outcome: RunOutcome) => {
+    saveFactsTx(analysisId, outcome.facts);
+    const isCompleted = outcome.status === 'completed';
+    if (outcome.status === 'completed') {
+      saveFindingsTx(analysisId, outcome.findings);
+    }
+    finalizeStmt.run({
+      id: analysisId,
+      status: outcome.status,
+      summary: isCompleted ? outcome.summary : null,
+      comparisonTableJson:
+        isCompleted && outcome.comparisonTable
+          ? JSON.stringify(ComparisonTableSchema.parse(outcome.comparisonTable))
+          : null,
+      warningsJson: JSON.stringify(outcome.warnings),
+      errorMessage: isCompleted ? null : outcome.errorMessage,
+      completedAt: outcome.completedAt,
+    });
+  });
+
   return {
+    /**
+     * Writes a finished run atomically: facts, findings with provenance, summary, table, warnings and
+     * final status. A throw rolls back everything, so the analysis never ends half-written.
+     */
+    persistRun(analysisId: string, outcome: RunOutcome): void {
+      persistRunTx(analysisId, outcome);
+    },
+
+    /** Most recent analyses first, without their facts or findings. */
+    list(limit: number): AnalysisSummary[] {
+      return listAnalysesStmt.all(limit).map((row) =>
+        AnalysisSummarySchema.parse({
+          id: row.id,
+          instruction: row.instruction,
+          status: row.status,
+          documentIds: listDocumentIdsStmt.all(row.id).map((r) => r.document_id),
+          createdAt: row.created_at,
+        }),
+      );
+    },
+
     /** Creates an analysis in `pending` state and links its documents, atomically. */
     create(input: CreateAnalysisInput): void {
       createTx(input);
@@ -260,6 +342,7 @@ export function createAnalysesRepo(db: Db) {
         summary: analysis.summary,
         missingInformation: allFindings.filter((f) => f.type === 'missing_information'),
         provider: analysis.provider,
+        warnings: z.array(z.string()).parse(JSON.parse(analysis.warnings_json)),
         errorMessage: analysis.error_message,
         createdAt: analysis.created_at,
         completedAt: analysis.completed_at,

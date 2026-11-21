@@ -77,7 +77,12 @@ export const errorHandler: ErrorRequestHandler = (err: unknown, _req, res, _next
   let mapped: MappedError | null = null;
 
   if (err instanceof AppError) {
-    mapped = { status: err.status, code: err.code, message: err.message };
+    mapped = {
+      status: err.status,
+      code: err.code,
+      message: err.message,
+      details: err.details,
+    };
   } else if (err instanceof multer.MulterError) {
     mapped = mapMulterError(err);
   } else if (err instanceof ZodError) {

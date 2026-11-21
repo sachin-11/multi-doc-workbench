@@ -2,11 +2,14 @@ import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 import type { Config } from './config/env.js';
+import type { AnalysesRepo } from './db/repositories/analysesRepo.js';
 import type { DocumentsRepo } from './db/repositories/documentsRepo.js';
 import type { BufferStore } from './storage/bufferStore.js';
 import type { DocumentProcessor } from './processing/index.js';
+import type { AnalysisService } from './analysis/analysisService.js';
 import { healthRouter } from './routes/health.js';
 import { createDocumentsRouter } from './routes/documents.js';
+import { createAnalysesRouter } from './routes/analyses.js';
 import { errorHandler, notFoundHandler } from './middleware/errorHandler.js';
 
 export interface AppDependencies {
@@ -14,6 +17,8 @@ export interface AppDependencies {
   documents: DocumentsRepo;
   buffers: BufferStore;
   processor: DocumentProcessor;
+  analyses: AnalysesRepo;
+  analysisService: AnalysisService;
 }
 
 /** Builds the Express app. All dependencies are passed in, so tests can use an in-memory DB. */
@@ -33,6 +38,15 @@ export function createApp(deps: AppDependencies): express.Express {
       buffers: deps.buffers,
       processor: deps.processor,
       limits: { maxFiles: deps.config.MAX_FILES, maxFileSizeMb: deps.config.MAX_FILE_SIZE_MB },
+    }),
+  );
+  app.use(
+    '/api/analyses',
+    createAnalysesRouter({
+      analyses: deps.analyses,
+      documents: deps.documents,
+      service: deps.analysisService,
+      maxDocuments: deps.config.MAX_FILES,
     }),
   );
 

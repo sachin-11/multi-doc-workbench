@@ -94,8 +94,33 @@ export const AnalysisResultSchema = z.object({
   summary: z.string().nullable(),
   missingInformation: z.array(FindingSchema),
   provider: AnalysisProviderSchema,
+  /** Non-fatal notes: skipped documents, failed extraction chunks, guard edits, single-document mode. */
+  warnings: z.array(z.string()),
   errorMessage: z.string().nullable(),
   createdAt: z.iso.datetime(),
   completedAt: z.iso.datetime().nullable(),
 });
 export type AnalysisResult = z.infer<typeof AnalysisResultSchema>;
+
+/** One row in GET /api/analyses. */
+export const AnalysisSummarySchema = z.object({
+  id: z.uuid(),
+  instruction: z.string(),
+  status: AnalysisStatusSchema,
+  documentIds: z.array(z.uuid()),
+  createdAt: z.iso.datetime(),
+});
+export type AnalysisSummary = z.infer<typeof AnalysisSummarySchema>;
+
+export const AnalysisListResponseSchema = z.object({
+  analyses: z.array(AnalysisSummarySchema),
+});
+export type AnalysisListResponse = z.infer<typeof AnalysisListResponseSchema>;
+
+export const ExportFormatSchema = z.enum(['markdown', 'json']);
+export type ExportFormat = z.infer<typeof ExportFormatSchema>;
+
+export const ExportQuerySchema = z.object({
+  format: ExportFormatSchema.default('markdown'),
+});
+export type ExportQuery = z.infer<typeof ExportQuerySchema>;

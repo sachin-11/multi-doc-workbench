@@ -149,6 +149,15 @@ export function createDocumentsRouter(deps: DocumentsRouteDeps): Router {
   // DELETE /api/documents/:id: removes the row and the in-memory bytes.
   router.delete('/:id', (req, res) => {
     const id = parseId(req.params.id);
+    findOr404(id);
+    // Analyses keep a record of which documents they used. Deleting one would drop its provenance rows.
+    if (documents.isUsedByAnalysis(id)) {
+      throw new AppError(
+        409,
+        'DOCUMENT_IN_USE',
+        'This document is used by a saved analysis, so it cannot be deleted.',
+      );
+    }
     if (!documents.delete(id)) throw new AppError(404, 'DOCUMENT_NOT_FOUND', 'Document not found.');
     buffers.delete(id);
     res.status(204).end();

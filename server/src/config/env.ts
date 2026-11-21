@@ -33,6 +33,8 @@ const EnvSchema = z.object({
   MAX_CHARS_PER_DOCUMENT: z.coerce.number().int().min(1000).max(500000).default(60000),
   PROCESSING_TIMEOUT_MS: z.coerce.number().int().min(1000).max(300000).default(20000),
   PROCESSING_CONCURRENCY: z.coerce.number().int().min(1).max(8).default(2),
+  // Total wall-clock budget for one analysis run (M6). Exceeding it marks the run failed.
+  ANALYSIS_TIMEOUT_MS: z.coerce.number().int().min(5000).max(600000).default(120000),
 });
 
 export type Config = z.infer<typeof EnvSchema>;

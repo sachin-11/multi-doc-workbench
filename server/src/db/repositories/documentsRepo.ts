@@ -79,6 +79,9 @@ export function createDocumentsRepo(db: Db) {
   const getByIdStmt = db.prepare<[string], DocumentRow>(`SELECT * FROM documents WHERE id = ?`);
   const listStmt = db.prepare<[], DocumentRow>(`SELECT * FROM documents ORDER BY created_at DESC`);
   const deleteStmt = db.prepare(`DELETE FROM documents WHERE id = ?`);
+  const usedByAnalysisStmt = db.prepare<[string], { found: number }>(
+    `SELECT 1 AS found FROM analysis_documents WHERE document_id = ? LIMIT 1`,
+  );
   const saveParsedStmt = db.prepare(`
     UPDATE documents SET
       status = 'processed',
@@ -111,6 +114,11 @@ export function createDocumentsRepo(db: Db) {
     /** Metadata only. Extracted text is never included in list results. */
     list(): DocumentMeta[] {
       return (listStmt.all() as DocumentRow[]).map((row) => rowToMeta(row));
+    },
+
+    /** True when at least one analysis used this document. Such documents cannot be deleted (see DELETE route). */
+    isUsedByAnalysis(id: string): boolean {
+      return usedByAnalysisStmt.get(id) !== undefined;
     },
 
     /** Deletes a document row. Returns false when no row matched. */
