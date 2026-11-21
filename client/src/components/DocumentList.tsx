@@ -1,6 +1,7 @@
 import type { DocumentDetail, DocumentMeta } from '@mdw/shared';
 import { formatBytes } from '../lib/precheck';
 import { StatusChip } from './StatusChip';
+import { Icon } from './Icon';
 
 export interface DocumentListProps {
   documents: readonly DocumentMeta[];
@@ -34,12 +35,14 @@ export function DocumentList({ documents, detailsById, isSelected, onToggle, onD
                 title={processed ? undefined : 'Only processed documents can be analysed'}
               />
             </div>
+            <span className={`file-icon file-icon-${doc.format ?? 'unknown'}`} aria-hidden="true">
+              {doc.format ? FORMAT_LABEL[doc.format] ?? doc.format : '?'}
+            </span>
             <div className="doc-main">
               <div className="doc-title-row">
                 <span className="doc-name" title={doc.originalName}>
                   {doc.originalName}
                 </span>
-                <span className="format-badge">{doc.format ? FORMAT_LABEL[doc.format] ?? doc.format : 'Unknown'}</span>
                 <span className="muted small">{formatBytes(doc.sizeBytes)}</span>
                 <StatusChip status={doc.status} />
               </div>
@@ -56,10 +59,11 @@ export function DocumentList({ documents, detailsById, isSelected, onToggle, onD
             </div>
             <button
               type="button"
-              className="btn btn-ghost btn-small"
+              className="btn btn-ghost btn-danger-ghost btn-small"
               onClick={() => onDelete(doc.id)}
               aria-label={`Delete ${doc.originalName}`}
             >
+              <Icon name="trash" size={15} />
               Delete
             </button>
           </li>

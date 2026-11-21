@@ -10,6 +10,7 @@ import { ResultsTabs } from './components/ResultsTabs';
 import type { FocusTarget } from './components/FactsByDocument';
 import type { SourceSelect } from './components/FindingCard';
 import { UploadDropzone } from './components/UploadDropzone';
+import { Icon } from './components/Icon';
 import './styles.css';
 
 interface PrecheckMessage {
@@ -72,17 +73,31 @@ export function App() {
   const batchProblem = precheck?.batch ?? null;
 
   return (
-    <div className="app">
+    <div className="app-shell">
       <header className="app-header">
-        <h1>Multi-Document Intelligence Workbench</h1>
-        <p className="muted">
-          Upload documents, give an instruction, and get findings with the document each one comes from.
-        </p>
+        <div className="app-header-inner brand">
+          <span className="brand-mark" aria-hidden="true">
+            <Icon name="layers" size={20} />
+          </span>
+          <div>
+            <h1>Multi-Document Intelligence Workbench</h1>
+            <p className="muted brand-subtitle">
+              Upload documents, give an instruction, and get findings with the document each one comes from.
+            </p>
+          </div>
+        </div>
       </header>
+
+      <div className="app">
 
       <main className="layout">
         <section className="card panel-card" aria-labelledby="documents-heading">
-          <h2 id="documents-heading">1. Documents</h2>
+          <h2 id="documents-heading">
+            <span className="step" aria-hidden="true">
+              1
+            </span>
+            Documents
+          </h2>
           <UploadDropzone limits={limits} busy={docs.uploading} onFiles={onFiles} />
 
           {docs.uploading && (
@@ -144,10 +159,12 @@ export function App() {
           )}
           {docs.documents.length > 0 && (
             <>
-              <p className="muted small">
-                {selectedCount} of {docs.documents.filter((d) => d.status === 'processed').length} processed
-                document{selectedCount === 1 ? '' : 's'} selected for analysis.
-              </p>
+              <div className="list-summary">
+                <p className="muted small">
+                  {selectedCount} of {docs.documents.filter((d) => d.status === 'processed').length} processed
+                  document{selectedCount === 1 ? '' : 's'} selected for analysis.
+                </p>
+              </div>
               <DocumentList
                 documents={docs.documents}
                 detailsById={docs.detailsById}
@@ -160,7 +177,12 @@ export function App() {
         </section>
 
         <section className="card panel-card" aria-labelledby="instruction-heading">
-          <h2 id="instruction-heading">2. Instruction</h2>
+          <h2 id="instruction-heading">
+            <span className="step" aria-hidden="true">
+              2
+            </span>
+            Instruction
+          </h2>
           <InstructionPanel
             value={instruction}
             onChange={setInstruction}
@@ -178,7 +200,17 @@ export function App() {
           3. Results
         </h2>
         {analysis.state.kind === 'idle' && (
-          <p className="empty-state">Results appear here after you run an analysis.</p>
+          <div className="empty-results">
+            <span className="icon-bubble" aria-hidden="true">
+              <Icon name="sparkles" size={22} />
+            </span>
+            <p className="empty-state">Results appear here after you run an analysis.</p>
+            <ol className="how-it-works">
+              <li>Upload two or more documents</li>
+              <li>Describe what to compare</li>
+              <li>Review findings with their sources</li>
+            </ol>
+          </div>
         )}
         {analysis.state.kind === 'running' && (
           <div className="skeleton" aria-hidden="true">
@@ -201,6 +233,11 @@ export function App() {
           />
         )}
       </section>
+
+      <footer className="app-footer">
+        Facts show what a document states. AI findings are generated from those facts and always cite their source documents.
+      </footer>
+      </div>
     </div>
   );
 }

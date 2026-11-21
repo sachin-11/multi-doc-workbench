@@ -1,5 +1,6 @@
 import { useRef, useState, type DragEvent } from 'react';
 import type { LimitsResponse } from '@mdw/shared';
+import { Icon } from './Icon';
 
 export interface UploadDropzoneProps {
   limits: LimitsResponse | null;
@@ -32,6 +33,9 @@ export function UploadDropzone({ limits, busy, onFiles }: UploadDropzoneProps) {
       onDragLeave={() => setDragging(false)}
       onDrop={handleDrop}
     >
+      <span className="dropzone-icon" aria-hidden="true">
+        <Icon name="upload" size={22} />
+      </span>
       <p className="dropzone-text">Drag files here, or</p>
       <button type="button" className="btn" onClick={() => inputRef.current?.click()} disabled={busy}>
         Choose files

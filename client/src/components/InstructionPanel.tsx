@@ -1,4 +1,5 @@
 import type { LimitsResponse } from '@mdw/shared';
+import { Icon } from './Icon';
 
 export const EXAMPLE_INSTRUCTIONS = [
   'Compare the information across all uploaded documents',
@@ -56,6 +57,7 @@ export function InstructionPanel({
         {hint}
       </p>
 
+      <p className="field-label small">Try an example</p>
       <div className="chips" role="group" aria-label="Example instructions">
         {EXAMPLE_INSTRUCTIONS.map((example) => (
           <button
@@ -71,7 +73,8 @@ export function InstructionPanel({
       </div>
 
       <div className="analyse-row">
-        <button type="button" className="btn btn-primary" onClick={onAnalyse} disabled={!canAnalyse}>
+        <button type="button" className="btn btn-primary btn-lg" onClick={onAnalyse} disabled={!canAnalyse}>
+          {!running && <Icon name="sparkles" size={18} />}
           {running ? 'Analysing…' : 'Analyse'}
         </button>
         {!running && selectedCount === 0 && (

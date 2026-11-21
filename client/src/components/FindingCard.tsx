@@ -32,7 +32,10 @@ export function FindingCard({ finding, documentNames, onSourceSelect }: FindingC
   const sources = uniqueByDocument(finding.sources);
 
   return (
-    <article className="card card-ai" aria-labelledby={headingId}>
+    <article
+      className={`card card-ai${finding.severity ? ` card-sev-${finding.severity}` : ''}`}
+      aria-labelledby={headingId}
+    >
       <header className="card-header">
         <Tag kind="ai" />
         <h3 id={headingId} className="card-title">
