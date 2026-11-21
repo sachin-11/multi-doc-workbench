@@ -4,6 +4,7 @@ import { openDatabase } from './db/client.js';
 import { createDocumentsRepo } from './db/repositories/documentsRepo.js';
 import { createDocumentProcessor } from './processing/index.js';
 import { createBufferStore } from './storage/bufferStore.js';
+import { getLLMProvider } from './llm/index.js';
 
 const config = loadConfig();
 const db = openDatabase(config.DB_PATH);
@@ -25,7 +26,5 @@ app.listen(config.PORT, () => {
   console.log(`[server] database: ${config.DB_PATH}`);
   console.log(`[server] CORS origin: ${config.CLIENT_ORIGIN}`);
   console.log(`[server] upload limits: ${config.MAX_FILES} files, ${config.MAX_FILE_SIZE_MB} MB each`);
-  console.log(
-    `[server] LLM provider: ${config.LLM_API_KEY ? 'openai-compatible' : 'MOCK (no LLM_API_KEY set)'}`,
-  );
+  console.log(`[server] LLM provider: ${getLLMProvider(config).name}`);
 });
